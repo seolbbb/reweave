@@ -186,3 +186,38 @@ class TestLinking:
         updated = _inject_links(notes, links)
         assert "[[y]]" in updated[0].frontmatter.related
         assert "[[x]]" in updated[1].frontmatter.related
+
+
+class TestValidation:
+    def test_check_frontmatter_missing_created(self):
+        from sbs.agents.validation import _check_frontmatter
+        note = _make_note("v1", "Validation Test")
+        note.frontmatter.created = ""
+        issues = _check_frontmatter([note])
+        assert any(i.category == "frontmatter" and i.severity == "error" for i in issues)
+
+    def test_check_frontmatter_no_tags(self):
+        from sbs.agents.validation import _check_frontmatter
+        note = _make_note("v2", "No Tags")
+        note.frontmatter.tags = []
+        issues = _check_frontmatter([note])
+        assert any(i.category == "frontmatter" and "tags" in i.message for i in issues)
+
+    def test_check_links_orphans(self):
+        from sbs.agents.validation import _check_links
+        notes = [_make_note("a", "A"), _make_note("b", "B"), _make_note("c", "C")]
+        links = [NoteLink(source_note_id="a", target_note_id="b",
+                          relationship="similar", description="test")]
+        issues, orphan_count = _check_links(notes, links)
+        assert orphan_count == 1  # 'c' is orphan
+
+    def test_check_links_excessive(self):
+        from sbs.agents.validation import _check_links, MAX_LINKS_PER_NOTE
+        notes = [_make_note("hub", "Hub")]
+        links = [
+            NoteLink(source_note_id="hub", target_note_id=f"t{i}",
+                     relationship="similar", description="test")
+            for i in range(MAX_LINKS_PER_NOTE + 5)
+        ]
+        issues, _ = _check_links(notes, links)
+        assert any("links" in i.message for i in issues)
