@@ -5,11 +5,11 @@ import pytest
 from sbs.agents.linking import ClusterItem, _create_mocs, _inject_links
 from sbs.agents.segmentation import SHORT_CONVERSATION_THRESHOLD, _format_messages
 from sbs.agents.synthesis import (
+    SynthesizedNote,
     _generate_literature_index,
     _generate_source_notes,
     _resolve_note_type,
     _slugify,
-    SynthesizedNote,
 )
 from sbs.models.conversation import NormalizedConversation, NormalizedMessage
 from sbs.models.extraction import ConceptItem, ExtractedKnowledge, ReferenceItem
