@@ -191,6 +191,9 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# SBS checkpoints
+.sbs-checkpoints/
+
 # PyPI configuration file
 .pypirc
 
