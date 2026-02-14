@@ -1,11 +1,13 @@
-"""Tests for agents — segmentation, extraction, synthesis (unit tests, no LLM)."""
+"""Tests for agents — segmentation, extraction, synthesis, linking (unit tests, no LLM)."""
 
 import pytest
 
 from sbs.models.conversation import NormalizedConversation, NormalizedMessage
 from sbs.models.extraction import ConceptItem, ExtractedKnowledge, InsightItem
+from sbs.models.note import DraftNote, NoteLink, NoteFrontmatter
 from sbs.agents.segmentation import _format_messages, SHORT_CONVERSATION_THRESHOLD
 from sbs.agents.synthesis import _slugify, _generate_source_notes
+from sbs.agents.linking import _create_mocs, _inject_links, ClusterItem
 
 
 class TestSegmentation:
@@ -132,3 +134,55 @@ class TestSegmentationShortConversation:
         assert len(segments) == 1
         assert segments[0].topic_label == "Short Chat"
         assert len(segments[0].messages) == 5
+
+
+def _make_note(note_id: str, title: str, tags: list[str] | None = None) -> DraftNote:
+    fm = NoteFrontmatter(
+        type="permanent", created="2026-01-01T00:00:00Z",
+        tags=tags or ["test"],
+    )
+    return DraftNote(
+        id=note_id, filename=f"{note_id}-test.md", type="permanent",
+        title=title, frontmatter=fm, body="Content",
+    )
+
+
+class TestLinking:
+    def test_create_mocs_minimum_3(self):
+        notes = {f"n{i}": _make_note(f"n{i}", f"Note {i}") for i in range(5)}
+        clusters = [
+            ClusterItem(cluster_label="Big Cluster", note_ids=["n0", "n1", "n2", "n3"]),
+            ClusterItem(cluster_label="Small Cluster", note_ids=["n4"]),
+        ]
+        mocs = _create_mocs(clusters, notes)
+        assert len(mocs) == 1
+        assert mocs[0].title == "Big Cluster"
+        assert len(mocs[0].note_ids) == 4
+
+    def test_create_mocs_empty(self):
+        mocs = _create_mocs([], {})
+        assert mocs == []
+
+    def test_inject_links(self):
+        notes = [_make_note("a", "A"), _make_note("b", "B"), _make_note("c", "C")]
+        links = [
+            NoteLink(source_note_id="a", target_note_id="b",
+                     relationship="similar", description="test"),
+        ]
+        updated = _inject_links(notes, links)
+        a_related = updated[0].frontmatter.related
+        b_related = updated[1].frontmatter.related
+        assert "[[b]]" in a_related
+        assert "[[a]]" in b_related
+        # C should have no links
+        assert updated[2].frontmatter.related == []
+
+    def test_inject_links_bidirectional(self):
+        notes = [_make_note("x", "X"), _make_note("y", "Y")]
+        links = [
+            NoteLink(source_note_id="x", target_note_id="y",
+                     relationship="extends", description="test"),
+        ]
+        updated = _inject_links(notes, links)
+        assert "[[y]]" in updated[0].frontmatter.related
+        assert "[[x]]" in updated[1].frontmatter.related
