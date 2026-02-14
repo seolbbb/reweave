@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -27,8 +27,13 @@ def version_callback(value: bool) -> None:
 @app.callback()
 def main(
     version: Annotated[
-        Optional[bool],
-        typer.Option("--version", "-V", help="Show version and exit.", callback=version_callback, is_eager=True),
+        bool | None,
+        typer.Option(
+            "--version", "-V",
+            help="Show version and exit.",
+            callback=version_callback,
+            is_eager=True,
+        ),
     ] = None,
 ) -> None:
     """Second Brain Starter CLI."""
@@ -36,13 +41,19 @@ def main(
 
 @app.command()
 def convert(
-    input_dir: Annotated[Path, typer.Argument(help="Directory containing exported conversation JSON files.")],
-    output: Annotated[Path, typer.Option("-o", "--output", help="Output vault directory.")] = Path("./vault"),
+    input_dir: Annotated[
+        Path, typer.Argument(help="Directory containing exported conversation JSON files.")
+    ],
+    output: Annotated[
+        Path, typer.Option("-o", "--output", help="Output vault directory.")
+    ] = Path("./vault"),
     provider: Annotated[str, typer.Option(help="LLM provider: anthropic | openai")] = "anthropic",
-    model: Annotated[Optional[str], typer.Option(help="Main model name.")] = None,
-    cheap_model: Annotated[Optional[str], typer.Option(help="Cheap model name.")] = None,
+    model: Annotated[str | None, typer.Option(help="Main model name.")] = None,
+    cheap_model: Annotated[str | None, typer.Option(help="Cheap model name.")] = None,
     concurrency: Annotated[int, typer.Option(help="Max concurrent LLM calls.")] = 3,
-    checkpoint_dir: Annotated[Path, typer.Option(help="Checkpoint directory.")] = Path("./.sbs-checkpoints"),
+    checkpoint_dir: Annotated[
+        Path, typer.Option(help="Checkpoint directory.")
+    ] = Path("./.sbs-checkpoints"),
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Estimate cost only.")] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose logging.")] = False,
 ) -> None:
@@ -71,15 +82,17 @@ def convert(
 
 @app.command()
 def estimate(
-    input_dir: Annotated[Path, typer.Argument(help="Directory containing exported conversation JSON files.")],
+    input_dir: Annotated[
+        Path, typer.Argument(help="Directory containing exported conversation JSON files.")
+    ],
     provider: Annotated[str, typer.Option(help="LLM provider for cost estimation.")] = "anthropic",
-    model: Annotated[Optional[str], typer.Option(help="Main model name.")] = None,
-    cheap_model: Annotated[Optional[str], typer.Option(help="Cheap model name.")] = None,
+    model: Annotated[str | None, typer.Option(help="Main model name.")] = None,
+    cheap_model: Annotated[str | None, typer.Option(help="Cheap model name.")] = None,
 ) -> None:
     """Estimate token usage and cost without running the pipeline."""
     from sbs.config import Config
-    from sbs.parsers.detector import parse_directory
     from sbs.llm.cost import PRICING
+    from sbs.parsers.detector import parse_directory
 
     config = Config(input_dir=input_dir, provider=provider, dry_run=True)  # type: ignore[arg-type]
     if model:
@@ -94,7 +107,7 @@ def estimate(
     )
     est_tokens = total_chars // 4  # rough estimate: 4 chars per token
 
-    console.print(f"[bold]Cost Estimation[/bold]")
+    console.print("[bold]Cost Estimation[/bold]")
     console.print(f"  Conversations: {len(conversations)}")
     console.print(f"  Total messages: {total_messages}")
     console.print(f"  Estimated tokens: ~{est_tokens:,}")
@@ -110,11 +123,19 @@ def estimate(
     est_synth_cost = (est_tokens / 1_000_000) * main_pricing[0] * 3
     est_link_cost = (est_tokens / 1_000_000) * main_pricing[0] * 1
     est_validate_cost = (est_tokens / 1_000_000) * cheap_pricing[0] * 0.5
-    total_est = est_segment_cost + est_extract_cost + est_synth_cost + est_link_cost + est_validate_cost
+    total_est = (
+        est_segment_cost + est_extract_cost + est_synth_cost + est_link_cost + est_validate_cost
+    )
 
     console.print(f"  [bold]Estimated cost: ${total_est:.4f}[/bold]")
-    console.print(f"  Main model ({config.model}): ${main_pricing[0]}/1M in, ${main_pricing[1]}/1M out")
-    console.print(f"  Cheap model ({config.cheap_model}): ${cheap_pricing[0]}/1M in, ${cheap_pricing[1]}/1M out")
+    console.print(
+        f"  Main model ({config.model}): "
+        f"${main_pricing[0]}/1M in, ${main_pricing[1]}/1M out"
+    )
+    console.print(
+        f"  Cheap model ({config.cheap_model}): "
+        f"${cheap_pricing[0]}/1M in, ${cheap_pricing[1]}/1M out"
+    )
 
 
 @app.command()
@@ -135,11 +156,10 @@ def validate(
     vault_dir: Annotated[Path, typer.Argument(help="Path to the Obsidian vault to validate.")],
 ) -> None:
     """Validate an existing vault for quality (deterministic checks only)."""
+    import yaml
+
     from sbs.agents.validation import _check_frontmatter, _check_links
     from sbs.models.note import DraftNote, NoteFrontmatter
-    from sbs.output.naming import sanitize_filename
-
-    import yaml
 
     console.print(f"[bold]Validating vault:[/bold] {vault_dir}")
 
@@ -166,7 +186,9 @@ def validate(
                         title=note_id, frontmatter=fm, body=parts[2],
                     ))
                 except Exception:
-                    console.print(f"  [yellow]Skipping {md_file.name}: invalid frontmatter[/yellow]")
+                    console.print(
+                        f"  [yellow]Skipping {md_file.name}: invalid frontmatter[/yellow]"
+                    )
 
     console.print(f"  Found {len(notes)} notes")
 
@@ -178,7 +200,9 @@ def validate(
         for issue in issues:
             color = "red" if issue.severity == "error" else "yellow"
             note_ref = f" ({issue.note_id})" if issue.note_id else ""
-            console.print(f"  [{color}]{issue.severity.upper()}[/{color}]: {issue.message}{note_ref}")
+            console.print(
+                f"  [{color}]{issue.severity.upper()}[/{color}]: {issue.message}{note_ref}"
+            )
     else:
         console.print("  [green]No issues found![/green]")
 

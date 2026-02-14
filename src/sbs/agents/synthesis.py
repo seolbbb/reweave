@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
@@ -101,7 +101,7 @@ async def _synthesize_single(
     draft_notes = []
     for note_data in result.notes:
         counter[0] += 1
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         note_id = now.strftime("%Y%m%d%H%M%S") + f"{counter[0]:04d}"
         slug = _slugify(note_data.title)
         filename = f"{note_id}-{slug}.md"

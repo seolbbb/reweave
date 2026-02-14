@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sbs.config import Config
 from sbs.models.conversation import NormalizedConversation
 from sbs.models.extraction import ExtractedKnowledge
-from sbs.models.note import DraftNote, MOC, NoteLink
+from sbs.models.note import MOC, DraftNote, NoteLink
 from sbs.models.segment import Segment
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sbs.models.conversation import NormalizedConversation, NormalizedMessage
@@ -135,7 +135,7 @@ class ChatGPTParser:
     def _unix_to_iso(ts: float | int | None) -> str:
         if ts is None:
             return ""
-        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+        return datetime.fromtimestamp(ts, tz=UTC).isoformat()
 
     @staticmethod
     def _make_id(source: str, title: str, created_at: str) -> str:

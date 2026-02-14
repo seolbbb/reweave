@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Awaitable
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -105,7 +105,9 @@ async def run_pipeline(config: Config) -> PipelineState:
 
     if config.dry_run:
         conversations = parse_directory(config.input_dir)
-        console.print(f"\n[yellow]Dry-run mode[/yellow] -- {len(conversations)} conversations found")
+        console.print(
+            f"\n[yellow]Dry-run mode[/yellow] -- {len(conversations)} conversations found"
+        )
         total_messages = sum(len(c.messages) for c in conversations)
         console.print(f"  Total messages: {total_messages}")
         console.print("  No LLM calls will be made.")
@@ -117,7 +119,7 @@ async def run_pipeline(config: Config) -> PipelineState:
 
     state = PipelineState(
         config=config,
-        started_at=datetime.now(tz=timezone.utc).isoformat(),
+        started_at=datetime.now(tz=UTC).isoformat(),
         input_hash=CheckpointManager.compute_input_hash(config.input_dir),
     )
 
@@ -144,9 +146,11 @@ async def run_pipeline(config: Config) -> PipelineState:
 
     write_vault(state)
 
-    console.print(f"\n[bold green]Pipeline complete![/bold green]")
+    console.print("\n[bold green]Pipeline complete![/bold green]")
     console.print(f"  Cost: ${state.cost.estimated_cost_usd:.4f}")
-    console.print(f"  Tokens: {state.cost.total_input_tokens:,} in / {state.cost.total_output_tokens:,} out")
+    console.print(
+        f"  Tokens: {state.cost.total_input_tokens:,} in / {state.cost.total_output_tokens:,} out"
+    )
 
     return state
 
@@ -158,7 +162,7 @@ async def resume_pipeline(checkpoint_path: Path, verbose: bool = False) -> Pipel
     )
     state = checkpoint_mgr.load(checkpoint_path)
 
-    console.print(f"[bold]Resuming from checkpoint[/bold]")
+    console.print("[bold]Resuming from checkpoint[/bold]")
     console.print(f"  Completed stages: {state.completed_stages}")
 
     if verbose:
@@ -186,5 +190,5 @@ async def resume_pipeline(checkpoint_path: Path, verbose: bool = False) -> Pipel
 
     write_vault(state)
 
-    console.print(f"\n[bold green]Pipeline resumed and complete![/bold green]")
+    console.print("\n[bold green]Pipeline resumed and complete![/bold green]")
     return state

@@ -3,7 +3,7 @@
 import pytest
 
 from sbs.config import Config
-from sbs.models.note import DraftNote, MOC, NoteFrontmatter
+from sbs.models.note import MOC, DraftNote, NoteFrontmatter
 from sbs.models.pipeline import PipelineState
 from sbs.output.naming import sanitize_filename, slugify
 from sbs.output.templates import render_moc, render_permanent_note, render_source_note

@@ -67,12 +67,12 @@ def _check_frontmatter(notes) -> list[ValidationIssue]:
         if not fm.created:
             issues.append(ValidationIssue(
                 severity="error", category="frontmatter",
-                message=f"Missing 'created' date", note_id=note.id,
+                message="Missing 'created' date", note_id=note.id,
             ))
         if not fm.tags:
             issues.append(ValidationIssue(
                 severity="warning", category="frontmatter",
-                message=f"No tags assigned", note_id=note.id,
+                message="No tags assigned", note_id=note.id,
             ))
     return issues
 

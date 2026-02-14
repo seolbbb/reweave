@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import yaml
 
-from sbs.models.note import DraftNote, MOC, NoteFrontmatter
+from sbs.models.note import MOC, DraftNote, NoteFrontmatter
 
 
 def render_permanent_note(note: DraftNote) -> str:
@@ -14,7 +14,9 @@ def render_permanent_note(note: DraftNote) -> str:
 
     if note.source_segment_ids:
         lines.extend(["", "## Source"])
-        lines.append(f"{note.frontmatter.source_ref} segment(s): {', '.join(note.source_segment_ids)}")
+        lines.append(
+            f"{note.frontmatter.source_ref} segment(s): {', '.join(note.source_segment_ids)}"
+        )
 
     return "\n".join(lines) + "\n"
 
@@ -32,7 +34,11 @@ def render_moc(moc: MOC, note_map: dict[str, DraftNote] | None = None) -> str:
         "created": moc.id,
         "tags": ["moc"] + moc.tags,
     }
-    fm = "---\n" + yaml.dump(fm_data, default_flow_style=False, allow_unicode=True).strip() + "\n---"
+    fm = (
+        "---\n"
+        + yaml.dump(fm_data, default_flow_style=False, allow_unicode=True).strip()
+        + "\n---"
+    )
 
     lines = [fm, "", f"# {moc.title}", ""]
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sbs.models.pipeline import PipelineState
@@ -19,7 +19,7 @@ class CheckpointManager:
 
     def save(self, state: PipelineState, stage: int) -> Path:
         """Save state after completing a stage."""
-        ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d%H%M%S")
+        ts = datetime.now(tz=UTC).strftime("%Y%m%d%H%M%S")
         filename = f"checkpoint-stage-{stage}-{ts}.json"
         path = self._dir / filename
         path.write_text(state.model_dump_json(indent=2), encoding="utf-8")

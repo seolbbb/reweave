@@ -9,7 +9,7 @@ from sbs.models.extraction import (
     OpenQuestion,
     TodoItem,
 )
-from sbs.models.note import DraftNote, MOC, NoteLink, NoteFrontmatter
+from sbs.models.note import MOC, DraftNote, NoteFrontmatter, NoteLink
 from sbs.models.pipeline import (
     CostSummary,
     PipelineState,

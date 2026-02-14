@@ -1,20 +1,20 @@
 """Tests for Pydantic data models."""
 
+from sbs.config import Config
 from sbs.models import (
+    MOC,
     ConceptItem,
     CostSummary,
     DraftNote,
     ExtractedKnowledge,
-    MOC,
     NormalizedConversation,
     NormalizedMessage,
-    NoteLink,
     NoteFrontmatter,
+    NoteLink,
     PipelineState,
     Segment,
     ValidationReport,
 )
-from sbs.config import Config
 
 
 class TestNormalizedMessage:

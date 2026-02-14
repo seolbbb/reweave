@@ -14,7 +14,7 @@ from sbs.llm.prompts import (
     LINKING_DISCOVER_SYSTEM,
     LINKING_DISCOVER_USER,
 )
-from sbs.models.note import DraftNote, MOC, NoteLink
+from sbs.models.note import MOC, DraftNote, NoteLink
 
 
 class ClusterItem(BaseModel):

@@ -2,12 +2,12 @@
 
 import pytest
 
+from sbs.agents.linking import ClusterItem, _create_mocs, _inject_links
+from sbs.agents.segmentation import SHORT_CONVERSATION_THRESHOLD, _format_messages
+from sbs.agents.synthesis import _generate_source_notes, _slugify
 from sbs.models.conversation import NormalizedConversation, NormalizedMessage
-from sbs.models.extraction import ConceptItem, ExtractedKnowledge, InsightItem
-from sbs.models.note import DraftNote, NoteLink, NoteFrontmatter
-from sbs.agents.segmentation import _format_messages, SHORT_CONVERSATION_THRESHOLD
-from sbs.agents.synthesis import _slugify, _generate_source_notes
-from sbs.agents.linking import _create_mocs, _inject_links, ClusterItem
+from sbs.models.extraction import ConceptItem, ExtractedKnowledge
+from sbs.models.note import DraftNote, NoteFrontmatter, NoteLink
 
 
 class TestSegmentation:
@@ -212,7 +212,7 @@ class TestValidation:
         assert orphan_count == 1  # 'c' is orphan
 
     def test_check_links_excessive(self):
-        from sbs.agents.validation import _check_links, MAX_LINKS_PER_NOTE
+        from sbs.agents.validation import MAX_LINKS_PER_NOTE, _check_links
         notes = [_make_note("hub", "Hub")]
         links = [
             NoteLink(source_note_id="hub", target_note_id=f"t{i}",
