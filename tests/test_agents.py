@@ -4,9 +4,15 @@ import pytest
 
 from sbs.agents.linking import ClusterItem, _create_mocs, _inject_links
 from sbs.agents.segmentation import SHORT_CONVERSATION_THRESHOLD, _format_messages
-from sbs.agents.synthesis import _generate_source_notes, _slugify
+from sbs.agents.synthesis import (
+    _generate_literature_index,
+    _generate_source_notes,
+    _resolve_note_type,
+    _slugify,
+    SynthesizedNote,
+)
 from sbs.models.conversation import NormalizedConversation, NormalizedMessage
-from sbs.models.extraction import ConceptItem, ExtractedKnowledge
+from sbs.models.extraction import ConceptItem, ExtractedKnowledge, ReferenceItem
 from sbs.models.note import DraftNote, NoteFrontmatter, NoteLink
 
 
@@ -110,6 +116,56 @@ class TestSynthesis:
         notes = _generate_source_notes(convs, extractions)
         assert "Machine Learning" in notes[0].body
         assert "Deep Learning" in notes[0].body
+
+    def test_generate_literature_index(self):
+        convs = [
+            NormalizedConversation(
+                id="c1",
+                title="Chat 1",
+                source="chatgpt",
+                created_at="2026-01-01T00:00:00Z",
+                messages=[NormalizedMessage(role="user", content="Read this paper")],
+                raw_message_count=1,
+            )
+        ]
+        extractions = [
+            ExtractedKnowledge(
+                segment_id="c1-seg-0",
+                conversation_id="c1",
+                topic_label="Research",
+                references=[
+                    ReferenceItem(
+                        title="Attention Is All You Need",
+                        author="Vaswani et al.",
+                        year="2017",
+                        source_type="paper",
+                        mention_context="Transformer architecture reference",
+                    )
+                ],
+            )
+        ]
+
+        source_notes = _generate_source_notes(convs, extractions)
+        literature = _generate_literature_index(extractions, source_notes)
+
+        assert len(literature) == 1
+        assert literature[0].type == "literature"
+        assert "Attention Is All You Need" in literature[0].body
+
+    def test_resolve_note_type_guardrail(self):
+        ek = ExtractedKnowledge(
+            segment_id="s1",
+            conversation_id="c1",
+            topic_label="Test",
+        )
+        note_data = SynthesizedNote(
+            title="Thin note",
+            body="Too short.",
+            recommended_type="permanent",
+            tags=["test"],
+            link_candidates=[],
+        )
+        assert _resolve_note_type(note_data, ek) == "fleeting"
 
 
 class TestSegmentationShortConversation:

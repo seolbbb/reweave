@@ -1,4 +1,4 @@
-"""Prompt templates for all LLM-powered pipeline stages."""
+﻿"""Prompt templates for all LLM-powered pipeline stages."""
 
 SEGMENTATION_SYSTEM = """\
 You are a conversation analyst. Your task is to identify topic transitions \
@@ -40,21 +40,27 @@ Extract structured knowledge from this conversation segment about "{topic_label}
 {messages}"""
 
 SYNTHESIS_SYSTEM = """\
-You are a Zettelkasten note writer. Your task is to transform extracted knowledge \
-into atomic, self-contained notes.
+You are a Zettelkasten note writer and triage editor. Your task is to transform \
+extracted knowledge into atomic notes and classify each note as either fleeting or permanent.
 
 Rules:
-1. ONE idea per note — the note should be about exactly one concept or insight
-2. Self-contained — a reader should understand the note without other context
-3. Rephrase, don't copy — rewrite in your own words, synthesizing the knowledge
+1. ONE idea per note -- the note should be about exactly one concept or insight
+2. Self-contained -- a reader should understand the note without other context
+3. Rephrase, don't copy -- rewrite in your own words, synthesizing the knowledge
 4. Use clear, concise language
 5. Include relevant context from the source
+6. Classify note type:
+   - permanent: stable, reusable knowledge with clear claim or model
+   - fleeting: rough or incomplete idea that needs refinement before permanence
 
 For each note, provide:
 - title: A declarative statement or descriptive phrase (not a question)
 - body: The note content in Markdown (2-5 paragraphs)
+- recommended_type: "fleeting" or "permanent"
+- why_type: one sentence rationale for your type choice
 - tags: 2-5 relevant tags (lowercase, hyphenated)
-- link_candidates: Names of other concepts this note could link to"""
+- link_candidates: Names of other concepts this note could link to
+- expansion_prompts: 2-4 prompts that would help evolve the note (required for fleeting notes)"""
 
 SYNTHESIS_USER = """\
 Create atomic Zettelkasten notes from this extracted knowledge:
@@ -65,6 +71,7 @@ Summary: {summary}
 Concepts: {concepts}
 Decisions: {decisions}
 Insights: {insights}
+References: {references}
 
 Source conversation: {source_ref}
 Conversation date: {conversation_date}"""
