@@ -12,6 +12,7 @@ from sbs.models import (
     NoteFrontmatter,
     NoteLink,
     PipelineState,
+    ReferenceItem,
     Segment,
     ValidationReport,
 )
@@ -75,6 +76,24 @@ class TestExtractedKnowledge:
         assert len(ek.concepts) == 1
         assert ek.concepts[0].name == "Zettelkasten"
 
+    def test_with_references(self):
+        ek = ExtractedKnowledge(
+            segment_id="s1",
+            conversation_id="c1",
+            topic_label="test",
+            references=[
+                ReferenceItem(
+                    title="How to Take Smart Notes",
+                    author="Sohnke Ahrens",
+                    year="2017",
+                    source_type="book",
+                    mention_context="Referenced as a Zettelkasten primer.",
+                )
+            ],
+        )
+        assert len(ek.references) == 1
+        assert ek.references[0].source_type == "book"
+
 
 class TestDraftNote:
     def test_permanent_note(self):
@@ -88,6 +107,22 @@ class TestDraftNote:
         )
         assert note.type == "permanent"
         assert note.frontmatter.status == "seedling"
+
+    def test_fleeting_note_type(self):
+        fm = NoteFrontmatter(
+            type="fleeting",
+            created="2026-01-01T00:00:00Z",
+            tags=["fleeting"],
+        )
+        note = DraftNote(
+            id="fleeting-1",
+            filename="fleeting-1.md",
+            type="fleeting",
+            title="Unsorted idea",
+            frontmatter=fm,
+            body="This is still a rough thought.",
+        )
+        assert note.type == "fleeting"
 
 
 class TestNoteLink:

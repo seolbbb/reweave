@@ -41,6 +41,16 @@ class OpenQuestion(BaseModel):
     context: str
 
 
+class ReferenceItem(BaseModel):
+    """A referenced external resource mentioned in the conversation."""
+
+    title: str
+    author: str = ""
+    year: str = ""
+    source_type: str = ""  # book, paper, article, video, etc.
+    mention_context: str = ""
+
+
 class ExtractedKnowledge(BaseModel):
     """Structured knowledge extracted from a single segment."""
 
@@ -52,4 +62,5 @@ class ExtractedKnowledge(BaseModel):
     insights: list[InsightItem] = []
     todos: list[TodoItem] = []
     open_questions: list[OpenQuestion] = []
+    references: list[ReferenceItem] = []
     summary: str = ""

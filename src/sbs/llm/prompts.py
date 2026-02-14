@@ -29,6 +29,7 @@ Extract:
 - insights: Notable insights or learnings (insight + context)
 - todos: Action items mentioned (task + status)
 - open_questions: Unresolved questions (question + context)
+- references: External resources mentioned (title + author + year + source_type + mention_context)
 - summary: A 1-2 sentence summary of the segment
 
 Be thorough but precise. Only extract what is actually discussed."""
