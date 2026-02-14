@@ -1,0 +1,88 @@
+[
+  {
+    "title": "Zettelkasten Discussion",
+    "create_time": 1707570900.0,
+    "update_time": 1707571800.0,
+    "mapping": {
+      "root-node": {
+        "id": "root-node",
+        "message": null,
+        "parent": null,
+        "children": ["msg-1"]
+      },
+      "msg-1": {
+        "id": "msg-1",
+        "message": {
+          "author": {"role": "user"},
+          "content": {"parts": ["What is the Zettelkasten method?"]},
+          "create_time": 1707570900.0
+        },
+        "parent": "root-node",
+        "children": ["msg-2"]
+      },
+      "msg-2": {
+        "id": "msg-2",
+        "message": {
+          "author": {"role": "assistant"},
+          "content": {"parts": ["The Zettelkasten method is a note-taking system developed by Niklas Luhmann. It uses atomic notes connected through links to build a network of knowledge."]},
+          "create_time": 1707570960.0
+        },
+        "parent": "msg-1",
+        "children": ["msg-3"]
+      },
+      "msg-3": {
+        "id": "msg-3",
+        "message": {
+          "author": {"role": "user"},
+          "content": {"parts": ["How do I implement it digitally?"]},
+          "create_time": 1707571020.0
+        },
+        "parent": "msg-2",
+        "children": ["msg-4"]
+      },
+      "msg-4": {
+        "id": "msg-4",
+        "message": {
+          "author": {"role": "assistant"},
+          "content": {"parts": ["Tools like Obsidian, Logseq, or Roam Research implement the Zettelkasten digitally. They use bidirectional links and graph views to visualize connections between notes."]},
+          "create_time": 1707571080.0
+        },
+        "parent": "msg-3",
+        "children": []
+      }
+    }
+  },
+  {
+    "title": "Python Best Practices",
+    "create_time": 1707660000.0,
+    "update_time": 1707661000.0,
+    "mapping": {
+      "root": {
+        "id": "root",
+        "message": null,
+        "parent": null,
+        "children": ["m1"]
+      },
+      "m1": {
+        "id": "m1",
+        "message": {
+          "author": {"role": "user"},
+          "content": {"parts": ["What are Python best practices for large projects?"]},
+          "create_time": 1707660000.0
+        },
+        "parent": "root",
+        "children": ["m2"]
+      },
+      "m2": {
+        "id": "m2",
+        "message": {
+          "author": {"role": "assistant"},
+          "content": {"parts": ["For large Python projects, use type hints, follow PEP 8, write tests, and organize code into packages."]},
+          "create_time": 1707660060.0
+        },
+        "parent": "m1",
+        "children": []
+      }
+    }
+  }
+]
