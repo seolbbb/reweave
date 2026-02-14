@@ -154,6 +154,8 @@ class TestValidationReport:
         report = ValidationReport()
         assert report.score == 0.0
         assert report.issues == []
+        assert report.fleeting_notes == 0
+        assert report.permanent_notes == 0
 
 
 class TestCostSummary:

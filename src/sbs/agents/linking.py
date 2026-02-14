@@ -1,4 +1,4 @@
-"""Stage 4: Linking agent — discover connections between notes and create MOCs."""
+﻿"""Stage 4 linking agent for note connections and MOC generation."""
 
 from __future__ import annotations
 
@@ -42,49 +42,58 @@ async def link_notes(
     llm: LLMClient,
     config: Config,
 ) -> tuple[list[NoteLink], list[MOC], list[DraftNote]]:
-    """Discover links between notes and create MOCs."""
+    """Discover links between permanent notes and create MOCs."""
     if not draft_notes:
         return [], [], []
 
+    _ = config
     note_map = {n.id: n for n in draft_notes}
+    permanent_notes = [n for n in draft_notes if n.type == "permanent"]
+    fleeting_notes = [n for n in draft_notes if n.type == "fleeting"]
 
-    # Step 1: Cluster notes by topic
-    clusters = await _cluster_notes(draft_notes, llm)
-
-    # Step 2: Discover links within each cluster
     all_links: list[NoteLink] = []
-    for cluster in clusters:
-        # Filter to notes that exist
-        valid_ids = [nid for nid in cluster.note_ids if nid in note_map]
-        if len(valid_ids) < 2:
-            continue
-        cluster_notes = [note_map[nid] for nid in valid_ids]
-        links = await _discover_links(cluster.cluster_label, cluster_notes, llm)
-        all_links.extend(links)
+    clusters: list[ClusterItem] = []
 
-    # Step 3: Create MOCs for clusters with 3+ notes
+    if permanent_notes:
+        # Step 1: Cluster permanent notes by topic.
+        clusters = await _cluster_notes(permanent_notes, llm)
+
+        # Step 2: Discover links within each cluster.
+        for cluster in clusters:
+            valid_ids = [nid for nid in cluster.note_ids if nid in note_map]
+            if len(valid_ids) < 2:
+                continue
+            cluster_notes = [note_map[nid] for nid in valid_ids]
+            links = await _discover_links(cluster.cluster_label, cluster_notes, llm)
+            all_links.extend(links)
+
+    # Step 3: Create MOCs for clusters with 3+ permanent notes.
     mocs = _create_mocs(clusters, note_map)
 
-    # Step 4: Insert links into notes as "related" frontmatter
+    # Step 4: Insert links into all knowledge notes.
     final_notes = _inject_links(draft_notes, all_links)
 
-    # Step 5: Handle orphan notes
+    # Step 5: Handle orphan permanent notes.
     linked_ids = set()
     for link in all_links:
         linked_ids.add(link.source_note_id)
         linked_ids.add(link.target_note_id)
 
-    orphan_notes = [n for n in draft_notes if n.id not in linked_ids]
-    if orphan_notes:
-        # Add orphans to a "Misc" MOC if they exist
-        misc_moc = MOC(
-            id="moc-misc",
-            title="Miscellaneous",
-            filename="MOC-miscellaneous.md",
-            tags=["misc"],
-            note_ids=[n.id for n in orphan_notes],
+    orphan_permanent = [n for n in permanent_notes if n.id not in linked_ids]
+    if orphan_permanent:
+        mocs.append(
+            MOC(
+                id="moc-misc",
+                title="Miscellaneous Permanent Notes",
+                filename="MOC-miscellaneous.md",
+                tags=["misc", "permanent"],
+                note_ids=[n.id for n in orphan_permanent],
+            )
         )
-        mocs.append(misc_moc)
+
+    # Step 6: Add fleeting triage MOC for inbox-style refinement.
+    if fleeting_notes:
+        mocs.append(_create_fleeting_triage_moc(fleeting_notes))
 
     return all_links, mocs, final_notes
 
@@ -105,9 +114,9 @@ async def _cluster_notes(
         schema=ClusteringResult,
     )
 
-    return result.clusters if result.clusters else [
-        ClusterItem(cluster_label="General", note_ids=[n.id for n in notes])
-    ]
+    if result.clusters:
+        return result.clusters
+    return [ClusterItem(cluster_label="General", note_ids=[n.id for n in notes])]
 
 
 async def _discover_links(
@@ -149,7 +158,8 @@ def _create_mocs(
     mocs = []
     for cluster in clusters:
         valid_ids = [nid for nid in cluster.note_ids if nid in note_map]
-        if len(valid_ids) < 3:
+        permanent_ids = [nid for nid in valid_ids if note_map[nid].type == "permanent"]
+        if len(permanent_ids) < 3:
             continue
 
         slug = re.sub(r"[^\w\s-]", "", cluster.cluster_label.lower())
@@ -159,8 +169,8 @@ def _create_mocs(
             id=f"moc-{slug}",
             title=cluster.cluster_label,
             filename=f"MOC-{slug}.md",
-            tags=[slug],
-            note_ids=valid_ids,
+            tags=[slug, "permanent"],
+            note_ids=permanent_ids,
         )
         mocs.append(moc)
 
@@ -171,7 +181,6 @@ def _inject_links(
     notes: list[DraftNote], links: list[NoteLink]
 ) -> list[DraftNote]:
     """Add discovered links to notes' related frontmatter."""
-    # Build adjacency map
     adjacency: dict[str, set[str]] = {}
     for link in links:
         adjacency.setdefault(link.source_note_id, set()).add(link.target_note_id)
@@ -185,3 +194,22 @@ def _inject_links(
         updated.append(note)
 
     return updated
+
+
+def _create_fleeting_triage_moc(fleeting_notes: list[DraftNote]) -> MOC:
+    """Create a triage MOC to help users promote fleeting notes."""
+    body_lines = [
+        "## Triage Guidance",
+        "- Promote notes with reusable claims into permanent notes.",
+        "- Merge duplicate rough ideas.",
+        "- Add evidence or examples before promoting.",
+    ]
+
+    return MOC(
+        id="moc-inbox-triage",
+        title="Inbox Triage",
+        filename="MOC-inbox-triage.md",
+        tags=["triage", "fleeting"],
+        note_ids=[note.id for note in fleeting_notes],
+        body="\n".join(body_lines),
+    )

@@ -94,12 +94,11 @@ You are a knowledge connector. Given a set of notes within a topic cluster, \
 find meaningful links between them.
 
 Link types:
-- similar: Notes discuss related concepts
-- contrasts: Notes present different perspectives
 - supports: One note provides evidence for another
-- contradicts: Notes present opposing views
-- prerequisite: One note is needed to understand another
 - extends: One note builds upon another
+- contrasts: Notes present different perspectives
+- prerequisite: One note is needed to understand another
+- example-of: One note provides a concrete example of another
 
 For each link, provide:
 - source_note_id: ID of the first note

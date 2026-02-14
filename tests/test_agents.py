@@ -192,13 +192,18 @@ class TestSegmentationShortConversation:
         assert len(segments[0].messages) == 5
 
 
-def _make_note(note_id: str, title: str, tags: list[str] | None = None) -> DraftNote:
+def _make_note(
+    note_id: str,
+    title: str,
+    tags: list[str] | None = None,
+    note_type: str = "permanent",
+) -> DraftNote:
     fm = NoteFrontmatter(
-        type="permanent", created="2026-01-01T00:00:00Z",
+        type=note_type, created="2026-01-01T00:00:00Z",
         tags=tags or ["test"],
     )
     return DraftNote(
-        id=note_id, filename=f"{note_id}-test.md", type="permanent",
+        id=note_id, filename=f"{note_id}-test.md", type=note_type,
         title=title, frontmatter=fm, body="Content",
     )
 
@@ -217,6 +222,16 @@ class TestLinking:
 
     def test_create_mocs_empty(self):
         mocs = _create_mocs([], {})
+        assert mocs == []
+
+    def test_create_mocs_excludes_fleeting(self):
+        notes = {
+            "n1": _make_note("n1", "Permanent 1"),
+            "n2": _make_note("n2", "Permanent 2"),
+            "n3": _make_note("n3", "Fleeting", note_type="fleeting"),
+        }
+        clusters = [ClusterItem(cluster_label="Mixed", note_ids=["n1", "n2", "n3"])]
+        mocs = _create_mocs(clusters, notes)
         assert mocs == []
 
     def test_inject_links(self):
@@ -258,6 +273,13 @@ class TestValidation:
         note.frontmatter.tags = []
         issues = _check_frontmatter([note])
         assert any(i.category == "frontmatter" and "tags" in i.message for i in issues)
+
+    def test_check_frontmatter_fleeting_needs_prompts(self):
+        from sbs.agents.validation import _check_frontmatter
+        note = _make_note("f1", "Fleeting", tags=["fleeting"], note_type="fleeting")
+        note.body = "rough idea without expansion"
+        issues = _check_frontmatter([note])
+        assert any(i.category == "fleeting" for i in issues)
 
     def test_check_links_orphans(self):
         from sbs.agents.validation import _check_links

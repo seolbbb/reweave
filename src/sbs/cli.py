@@ -163,37 +163,53 @@ def validate(
 
     console.print(f"[bold]Validating vault:[/bold] {vault_dir}")
 
-    notes_dir = vault_dir / "notes"
-    if not notes_dir.exists():
-        console.print("[red]No notes/ directory found.[/red]")
+    note_dirs = [
+        vault_dir / "200_fleeting",
+        vault_dir / "300_permanent",
+        vault_dir / "900_sources",
+        vault_dir / "500_literature",
+    ]
+    existing_note_dirs = [d for d in note_dirs if d.exists()]
+    if not existing_note_dirs:
+        console.print("[red]No generated note directories found in vault.[/red]")
         raise typer.Exit(1)
 
     # Read notes from vault
-    notes = []
-    for md_file in sorted(notes_dir.glob("*.md")):
-        content = md_file.read_text(encoding="utf-8")
-        # Parse frontmatter
-        if content.startswith("---"):
+    notes: list[DraftNote] = []
+    for note_dir in existing_note_dirs:
+        for md_file in sorted(note_dir.glob("*.md")):
+            content = md_file.read_text(encoding="utf-8")
+            if not content.startswith("---"):
+                continue
+
             parts = content.split("---", 2)
-            if len(parts) >= 3:
-                try:
-                    fm_data = yaml.safe_load(parts[1])
-                    fm = NoteFrontmatter.model_validate(fm_data)
-                    note_id = md_file.stem
-                    notes.append(DraftNote(
-                        id=note_id, filename=md_file.name,
-                        type=fm.type if fm.type in ("permanent", "source") else "permanent",
-                        title=note_id, frontmatter=fm, body=parts[2],
-                    ))
-                except Exception:
-                    console.print(
-                        f"  [yellow]Skipping {md_file.name}: invalid frontmatter[/yellow]"
+            if len(parts) < 3:
+                continue
+
+            try:
+                fm_data = yaml.safe_load(parts[1])
+                fm = NoteFrontmatter.model_validate(fm_data)
+                note_id = md_file.stem
+                notes.append(
+                    DraftNote(
+                        id=note_id,
+                        filename=md_file.name,
+                        type=fm.type if fm.type != "moc" else "permanent",
+                        title=note_id,
+                        frontmatter=fm,
+                        body=parts[2].strip(),
                     )
+                )
+            except Exception:
+                console.print(
+                    f"  [yellow]Skipping {md_file.name}: invalid frontmatter[/yellow]"
+                )
 
     console.print(f"  Found {len(notes)} notes")
 
     issues = _check_frontmatter(notes)
-    link_issues, orphan_count = _check_links(notes, [])
+    permanent_notes = [n for n in notes if n.type == "permanent"]
+    link_issues, orphan_count = _check_links(permanent_notes, [])
     issues.extend(link_issues)
 
     if issues:
