@@ -151,6 +151,7 @@ class TestSynthesis:
         assert len(literature) == 1
         assert literature[0].type == "literature"
         assert "Attention Is All You Need" in literature[0].body
+        assert "[[SRC-chatgpt-c1-chat-1|SRC-chatgpt-c1]]" in literature[0].body
 
     def test_resolve_note_type_guardrail(self):
         ek = ExtractedKnowledge(

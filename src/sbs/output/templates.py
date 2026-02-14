@@ -52,7 +52,9 @@ def render_moc(moc: MOC, note_map: dict[str, DraftNote] | None = None) -> str:
 
     if moc.body:
         lines.append(moc.body)
-    else:
+        lines.append("")
+
+    if moc.note_ids:
         lines.append("## Notes")
         for nid in moc.note_ids:
             if note_map and nid in note_map:

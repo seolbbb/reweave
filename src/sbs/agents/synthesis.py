@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -220,10 +221,13 @@ def _generate_literature_index(
     if not extractions:
         return []
 
-    source_by_conversation: dict[str, str] = {}
+    source_by_conversation: dict[str, tuple[str, str]] = {}
     for note in source_notes:
         if note.type == "source" and note.frontmatter.source_ref:
-            source_by_conversation[note.frontmatter.source_ref] = note.id
+            source_by_conversation[note.frontmatter.source_ref] = (
+                Path(note.filename).stem,
+                note.id,
+            )
 
     merged_refs: dict[str, dict[str, str | set[str]]] = {}
     for ek in extractions:
@@ -241,9 +245,12 @@ def _generate_literature_index(
 
             merged_refs[key]["contexts"].add(ref.mention_context or ek.topic_label)  # type: ignore[index]
 
-            source_id = source_by_conversation.get(ek.conversation_id)
-            if source_id:
-                merged_refs[key]["sources"].add(source_id)  # type: ignore[index]
+            source_link_info = source_by_conversation.get(ek.conversation_id)
+            if source_link_info:
+                link_target, display_id = source_link_info
+                merged_refs[key]["sources"].add(  # type: ignore[index]
+                    f"[[{link_target}|{display_id}]]"
+                )
 
     body_lines = ["# Literature Index", ""]
     body_lines.append("## Mentioned References")
@@ -275,8 +282,8 @@ def _generate_literature_index(
         }
     )
     if linked_sources:
-        for source_id in linked_sources:
-            body_lines.append(f"- [[{source_id}]]")
+        for source_link in linked_sources:
+            body_lines.append(f"- {source_link}")
     else:
         body_lines.append("- No source conversations linked to references yet.")
 

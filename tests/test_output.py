@@ -85,6 +85,19 @@ class TestTemplates:
         assert "[[note-2]]" in rendered
         assert "type: moc" in rendered
 
+    def test_render_moc_with_body_and_notes(self):
+        moc = MOC(
+            id="moc-triage",
+            title="Inbox Triage",
+            filename="MOC-inbox-triage.md",
+            note_ids=["note-1"],
+            body="## Triage Guidance\n- Refine this idea.",
+        )
+        rendered = render_moc(moc)
+        assert "## Triage Guidance" in rendered
+        assert "## Notes" in rendered
+        assert "[[note-1]]" in rendered
+
 
 class TestWriter:
     def test_write_vault_creates_directories(self, tmp_path):
