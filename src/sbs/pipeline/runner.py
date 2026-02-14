@@ -101,11 +101,11 @@ async def run_pipeline(config: Config) -> PipelineState:
     """Run the full conversion pipeline."""
     console.print("[bold green]SBS Pipeline Started[/bold green]")
     console.print(f"  Provider: {config.provider} | Model: {config.model}")
-    console.print(f"  Input: {config.input_dir} → Output: {config.output_dir}")
+    console.print(f"  Input: {config.input_dir} -> Output: {config.output_dir}")
 
     if config.dry_run:
         conversations = parse_directory(config.input_dir)
-        console.print(f"\n[yellow]Dry-run mode[/yellow] — {len(conversations)} conversations found")
+        console.print(f"\n[yellow]Dry-run mode[/yellow] -- {len(conversations)} conversations found")
         total_messages = sum(len(c.messages) for c in conversations)
         console.print(f"  Total messages: {total_messages}")
         console.print("  No LLM calls will be made.")
@@ -128,7 +128,7 @@ async def run_pipeline(config: Config) -> PipelineState:
     ) as progress:
         for i, (label, stage_fn) in enumerate(STAGES):
             if i in state.completed_stages:
-                console.print(f"  [dim]Stage {i}: {label} (skipped — already done)[/dim]")
+                console.print(f"  [dim]Stage {i}: {label} (skipped -- already done)[/dim]")
                 continue
 
             task = progress.add_task(f"Stage {i}: {label}...", total=None)
@@ -136,7 +136,7 @@ async def run_pipeline(config: Config) -> PipelineState:
             state.completed_stages.append(i)
             progress.remove_task(task)
 
-            console.print(f"  [green]Stage {i}: {label} ✓[/green]")
+            console.print(f"  [green]Stage {i}: {label} OK[/green]")
             checkpoint_mgr.save(state, i)
 
     # Write output
@@ -179,7 +179,7 @@ async def resume_pipeline(checkpoint_path: Path, verbose: bool = False) -> Pipel
             state.completed_stages.append(i)
             progress.remove_task(task)
 
-            console.print(f"  [green]Stage {i}: {label} ✓[/green]")
+            console.print(f"  [green]Stage {i}: {label} OK[/green]")
             checkpoint_mgr.save(state, i)
 
     from sbs.output.writer import write_vault

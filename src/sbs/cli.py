@@ -72,17 +72,49 @@ def convert(
 @app.command()
 def estimate(
     input_dir: Annotated[Path, typer.Argument(help="Directory containing exported conversation JSON files.")],
+    provider: Annotated[str, typer.Option(help="LLM provider for cost estimation.")] = "anthropic",
+    model: Annotated[Optional[str], typer.Option(help="Main model name.")] = None,
+    cheap_model: Annotated[Optional[str], typer.Option(help="Cheap model name.")] = None,
 ) -> None:
     """Estimate token usage and cost without running the pipeline."""
     from sbs.config import Config
+    from sbs.parsers.detector import parse_directory
+    from sbs.llm.cost import PRICING
 
-    config = Config(input_dir=input_dir, dry_run=True)
-    # Delegate to pipeline in dry-run mode
-    import asyncio
+    config = Config(input_dir=input_dir, provider=provider, dry_run=True)  # type: ignore[arg-type]
+    if model:
+        config.model = model
+    if cheap_model:
+        config.cheap_model = cheap_model
 
-    from sbs.pipeline.runner import run_pipeline
+    conversations = parse_directory(input_dir)
+    total_messages = sum(len(c.messages) for c in conversations)
+    total_chars = sum(
+        sum(len(m.content) for m in c.messages) for c in conversations
+    )
+    est_tokens = total_chars // 4  # rough estimate: 4 chars per token
 
-    asyncio.run(run_pipeline(config))
+    console.print(f"[bold]Cost Estimation[/bold]")
+    console.print(f"  Conversations: {len(conversations)}")
+    console.print(f"  Total messages: {total_messages}")
+    console.print(f"  Estimated tokens: ~{est_tokens:,}")
+    console.print()
+
+    # Estimate calls per stage
+    main_pricing = PRICING.get(config.model, (3.0, 15.0))
+    cheap_pricing = PRICING.get(config.cheap_model, (0.80, 4.0))
+
+    # Rough estimates: each segment ~ 2x tokens (in+out), extraction ~3x, synthesis ~3x
+    est_segment_cost = (est_tokens / 1_000_000) * cheap_pricing[0] * 2
+    est_extract_cost = (est_tokens / 1_000_000) * main_pricing[0] * 3
+    est_synth_cost = (est_tokens / 1_000_000) * main_pricing[0] * 3
+    est_link_cost = (est_tokens / 1_000_000) * main_pricing[0] * 1
+    est_validate_cost = (est_tokens / 1_000_000) * cheap_pricing[0] * 0.5
+    total_est = est_segment_cost + est_extract_cost + est_synth_cost + est_link_cost + est_validate_cost
+
+    console.print(f"  [bold]Estimated cost: ${total_est:.4f}[/bold]")
+    console.print(f"  Main model ({config.model}): ${main_pricing[0]}/1M in, ${main_pricing[1]}/1M out")
+    console.print(f"  Cheap model ({config.cheap_model}): ${cheap_pricing[0]}/1M in, ${cheap_pricing[1]}/1M out")
 
 
 @app.command()
@@ -102,7 +134,52 @@ def resume(
 def validate(
     vault_dir: Annotated[Path, typer.Argument(help="Path to the Obsidian vault to validate.")],
 ) -> None:
-    """Validate an existing vault for quality."""
+    """Validate an existing vault for quality (deterministic checks only)."""
+    from sbs.agents.validation import _check_frontmatter, _check_links
+    from sbs.models.note import DraftNote, NoteFrontmatter
+    from sbs.output.naming import sanitize_filename
+
+    import yaml
+
     console.print(f"[bold]Validating vault:[/bold] {vault_dir}")
-    # Will be implemented in Phase 9
-    console.print("[yellow]Validate command not yet implemented.[/yellow]")
+
+    notes_dir = vault_dir / "notes"
+    if not notes_dir.exists():
+        console.print("[red]No notes/ directory found.[/red]")
+        raise typer.Exit(1)
+
+    # Read notes from vault
+    notes = []
+    for md_file in sorted(notes_dir.glob("*.md")):
+        content = md_file.read_text(encoding="utf-8")
+        # Parse frontmatter
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                try:
+                    fm_data = yaml.safe_load(parts[1])
+                    fm = NoteFrontmatter.model_validate(fm_data)
+                    note_id = md_file.stem
+                    notes.append(DraftNote(
+                        id=note_id, filename=md_file.name,
+                        type=fm.type if fm.type in ("permanent", "source") else "permanent",
+                        title=note_id, frontmatter=fm, body=parts[2],
+                    ))
+                except Exception:
+                    console.print(f"  [yellow]Skipping {md_file.name}: invalid frontmatter[/yellow]")
+
+    console.print(f"  Found {len(notes)} notes")
+
+    issues = _check_frontmatter(notes)
+    link_issues, orphan_count = _check_links(notes, [])
+    issues.extend(link_issues)
+
+    if issues:
+        for issue in issues:
+            color = "red" if issue.severity == "error" else "yellow"
+            note_ref = f" ({issue.note_id})" if issue.note_id else ""
+            console.print(f"  [{color}]{issue.severity.upper()}[/{color}]: {issue.message}{note_ref}")
+    else:
+        console.print("  [green]No issues found![/green]")
+
+    console.print(f"  Orphan notes: {orphan_count}")

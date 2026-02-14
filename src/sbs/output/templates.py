@@ -43,7 +43,7 @@ def render_moc(moc: MOC, note_map: dict[str, DraftNote] | None = None) -> str:
         for nid in moc.note_ids:
             if note_map and nid in note_map:
                 note = note_map[nid]
-                lines.append(f"- [[{note.id}-{_safe_slug(note.title)}]] — {note.title}")
+                lines.append(f"- [[{note.id}-{_safe_slug(note.title)}]] -- {note.title}")
             else:
                 lines.append(f"- [[{nid}]]")
 
