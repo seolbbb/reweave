@@ -50,14 +50,19 @@ async def _stage_3_synthesize(state: PipelineState, llm: LLMClient) -> None:
     """Stage 3: Synthesize atomic notes from extracted knowledge."""
     from sbs.agents.synthesis import synthesize_notes
 
-    draft_notes, source_notes = await synthesize_notes(
+    draft_notes, source_notes, literature_notes = await synthesize_notes(
         state.extractions, state.conversations, llm, state.config
     )
     state.draft_notes = draft_notes
     state.source_notes = source_notes
+    state.literature_notes = literature_notes
+    fleeting_count = sum(1 for n in draft_notes if n.type == "fleeting")
+    permanent_count = sum(1 for n in draft_notes if n.type == "permanent")
     console.print(
-        f"  Synthesized [bold]{len(draft_notes)}[/bold] permanent notes, "
-        f"[bold]{len(source_notes)}[/bold] source notes"
+        f"  Synthesized [bold]{len(draft_notes)}[/bold] knowledge notes "
+        f"({permanent_count} permanent / {fleeting_count} fleeting), "
+        f"[bold]{len(source_notes)}[/bold] source notes, "
+        f"[bold]{len(literature_notes)}[/bold] literature index notes"
     )
 
 

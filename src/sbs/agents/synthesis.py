@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -21,8 +23,11 @@ class SynthesizedNote(BaseModel):
 
     title: str
     body: str
+    recommended_type: Literal["fleeting", "permanent"] = "permanent"
+    why_type: str = ""
     tags: list[str] = Field(default_factory=list)
     link_candidates: list[str] = Field(default_factory=list)
+    expansion_prompts: list[str] = Field(default_factory=list)
 
 
 class SynthesisResult(BaseModel):
@@ -36,7 +41,7 @@ async def synthesize_notes(
     conversations: list[NormalizedConversation],
     llm: LLMClient,
     config: Config,
-) -> tuple[list[DraftNote], list[DraftNote]]:
+) -> tuple[list[DraftNote], list[DraftNote], list[DraftNote]]:
     """Synthesize atomic notes + source notes from extracted knowledge."""
     conv_map = {c.id: c for c in conversations}
     semaphore = asyncio.Semaphore(config.concurrency)
@@ -57,8 +62,9 @@ async def synthesize_notes(
 
     # Generate source notes deterministically (no LLM)
     source_notes = _generate_source_notes(conversations, extractions)
+    literature_notes = _generate_literature_index(extractions, source_notes)
 
-    return draft_notes, source_notes
+    return draft_notes, source_notes, literature_notes
 
 
 async def _synthesize_single(
@@ -81,6 +87,13 @@ async def _synthesize_single(
     insights_text = "\n".join(
         f"- {i.insight} (context: {i.context})" for i in ek.insights
     ) or "None"
+    references_text = "\n".join(
+        (
+            f"- {r.title} | author: {r.author or 'unknown'} | year: {r.year or 'unknown'} "
+            f"| type: {r.source_type or 'unknown'} | context: {r.mention_context or 'n/a'}"
+        )
+        for r in ek.references
+    ) or "None"
 
     user_prompt = SYNTHESIS_USER.format(
         topic_label=ek.topic_label,
@@ -88,6 +101,7 @@ async def _synthesize_single(
         concepts=concepts_text,
         decisions=decisions_text,
         insights=insights_text,
+        references=references_text,
         source_ref=source_ref,
         conversation_date=conversation_date,
     )
@@ -103,11 +117,12 @@ async def _synthesize_single(
         counter[0] += 1
         now = datetime.now(tz=UTC)
         note_id = now.strftime("%Y%m%d%H%M%S") + f"{counter[0]:04d}"
+        note_type = _resolve_note_type(note_data, ek)
         slug = _slugify(note_data.title)
         filename = f"{note_id}-{slug}.md"
 
         frontmatter = NoteFrontmatter(
-            type="permanent",
+            type=note_type,
             created=now.isoformat(),
             tags=note_data.tags,
             source_type=conv.source if conv else "chatgpt",
@@ -116,13 +131,17 @@ async def _synthesize_single(
             participants=["user", "assistant"],
         )
 
+        note_body = note_data.body
+        if note_type == "fleeting":
+            note_body = _render_fleeting_body(note_data.body, note_data.expansion_prompts)
+
         draft = DraftNote(
             id=note_id,
             filename=filename,
-            type="permanent",
+            type=note_type,
             title=note_data.title,
             frontmatter=frontmatter,
-            body=note_data.body,
+            body=note_body,
             link_candidates=note_data.link_candidates,
             source_segment_ids=[ek.segment_id],
         )
@@ -192,6 +211,140 @@ def _generate_source_notes(
         )
 
     return source_notes
+
+
+def _generate_literature_index(
+    extractions: list[ExtractedKnowledge],
+    source_notes: list[DraftNote],
+) -> list[DraftNote]:
+    """Generate a literature index note from referenced external materials."""
+    if not extractions:
+        return []
+
+    source_by_conversation: dict[str, tuple[str, str]] = {}
+    for note in source_notes:
+        if note.type == "source" and note.frontmatter.source_ref:
+            source_by_conversation[note.frontmatter.source_ref] = (
+                Path(note.filename).stem,
+                note.id,
+            )
+
+    merged_refs: dict[str, dict[str, str | set[str]]] = {}
+    for ek in extractions:
+        for ref in ek.references:
+            key = _reference_key(ref.title, ref.year)
+            if key not in merged_refs:
+                merged_refs[key] = {
+                    "title": ref.title,
+                    "author": ref.author or "",
+                    "year": ref.year or "",
+                    "source_type": ref.source_type or "",
+                    "contexts": set(),
+                    "sources": set(),
+                }
+
+            merged_refs[key]["contexts"].add(ref.mention_context or ek.topic_label)  # type: ignore[index]
+
+            source_link_info = source_by_conversation.get(ek.conversation_id)
+            if source_link_info:
+                link_target, display_id = source_link_info
+                merged_refs[key]["sources"].add(  # type: ignore[index]
+                    f"[[{link_target}|{display_id}]]"
+                )
+
+    body_lines = ["# Literature Index", ""]
+    body_lines.append("## Mentioned References")
+    if merged_refs:
+        for item in merged_refs.values():
+            title = item["title"]
+            author = item["author"] or "unknown author"
+            year = item["year"] or "n/a"
+            source_type = item["source_type"] or "reference"
+            body_lines.append(f"- **{title}** ({source_type}, {author}, {year})")
+    else:
+        body_lines.append("- No external references were detected in this run.")
+
+    body_lines.extend(["", "## Suggested Follow-up Reading"])
+    if merged_refs:
+        for item in merged_refs.values():
+            contexts = sorted(item["contexts"])  # type: ignore[arg-type]
+            context_line = contexts[0] if contexts else "Investigate applicability to your notes."
+            body_lines.append(f"- {item['title']}: {context_line}")
+    else:
+        body_lines.append("- Add your own books/papers here as you expand the vault.")
+
+    body_lines.extend(["", "## Linked Source Conversations"])
+    linked_sources = sorted(
+        {
+            source_id
+            for item in merged_refs.values()
+            for source_id in item["sources"]  # type: ignore[index]
+        }
+    )
+    if linked_sources:
+        for source_link in linked_sources:
+            body_lines.append(f"- {source_link}")
+    else:
+        body_lines.append("- No source conversations linked to references yet.")
+
+    now = datetime.now(tz=UTC).isoformat()
+    literature_note = DraftNote(
+        id="literature-index",
+        filename="Literature.md",
+        type="literature",
+        title="Literature Index",
+        frontmatter=NoteFrontmatter(
+            type="literature",
+            created=now,
+            tags=["literature", "index"],
+            source_ref="",
+            conversation_date="",
+            participants=["user", "assistant"],
+        ),
+        body="\n".join(body_lines),
+    )
+    return [literature_note]
+
+
+def _resolve_note_type(
+    note_data: SynthesizedNote,
+    ek: ExtractedKnowledge,
+) -> Literal["fleeting", "permanent"]:
+    """Resolve final note type with a deterministic guardrail."""
+    body_len = len(note_data.body.strip())
+    has_supporting_structure = bool(ek.decisions or ek.insights)
+
+    if note_data.recommended_type == "permanent":
+        if body_len < 120 and not note_data.link_candidates:
+            return "fleeting"
+        return "permanent"
+
+    if has_supporting_structure and body_len >= 220:
+        return "permanent"
+
+    return "fleeting"
+
+
+def _render_fleeting_body(body: str, prompts: list[str]) -> str:
+    """Add triage guidance for fleeting notes."""
+    content = body.strip()
+    expansion_prompts = prompts or [
+        "What concrete claim should this idea make?",
+        "Which existing permanent note should this connect to?",
+        "What evidence would make this idea durable?",
+    ]
+
+    lines = [content, "", "## Expansion Prompts"]
+    for prompt in expansion_prompts[:5]:
+        lines.append(f"- {prompt}")
+    return "\n".join(lines)
+
+
+def _reference_key(title: str, year: str) -> str:
+    """Build a deterministic key for reference deduplication."""
+    normalized_title = " ".join(title.lower().strip().split())
+    normalized_year = year.strip()
+    return f"{normalized_title}::{normalized_year}"
 
 
 def _slugify(text: str) -> str:

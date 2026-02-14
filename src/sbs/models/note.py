@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 class NoteFrontmatter(BaseModel):
     """YAML frontmatter for an Obsidian note."""
 
-    type: Literal["permanent", "moc", "source"]
+    type: Literal["fleeting", "permanent", "moc", "source", "literature"]
     status: Literal["seedling", "budding", "evergreen"] = "seedling"
     created: str  # ISO 8601
     tags: list[str] = Field(default_factory=list)
@@ -26,7 +26,7 @@ class DraftNote(BaseModel):
 
     id: str  # YYYYMMDDHHMMSS-based ID
     filename: str  # {id}-{slug}.md
-    type: Literal["permanent", "source"]
+    type: Literal["fleeting", "permanent", "source", "literature"]
     title: str
     frontmatter: NoteFrontmatter
     body: str  # Markdown content

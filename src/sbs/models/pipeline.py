@@ -43,8 +43,11 @@ class ValidationReport(BaseModel):
     score: float = 0.0  # 0-100
     issues: list[ValidationIssue] = Field(default_factory=list)
     total_notes: int = 0
+    fleeting_notes: int = 0
+    permanent_notes: int = 0
     total_links: int = 0
     orphan_notes: int = 0
+    literature_references: int = 0
     sampled_atomicity_pass_rate: float = 0.0
 
 
@@ -59,6 +62,7 @@ class PipelineState(BaseModel):
     extractions: list[ExtractedKnowledge] = Field(default_factory=list)
     draft_notes: list[DraftNote] = Field(default_factory=list)
     source_notes: list[DraftNote] = Field(default_factory=list)
+    literature_notes: list[DraftNote] = Field(default_factory=list)
     links: list[NoteLink] = Field(default_factory=list)
     mocs: list[MOC] = Field(default_factory=list)
     final_notes: list[DraftNote] = Field(default_factory=list)

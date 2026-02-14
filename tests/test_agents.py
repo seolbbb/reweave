@@ -4,9 +4,15 @@ import pytest
 
 from sbs.agents.linking import ClusterItem, _create_mocs, _inject_links
 from sbs.agents.segmentation import SHORT_CONVERSATION_THRESHOLD, _format_messages
-from sbs.agents.synthesis import _generate_source_notes, _slugify
+from sbs.agents.synthesis import (
+    SynthesizedNote,
+    _generate_literature_index,
+    _generate_source_notes,
+    _resolve_note_type,
+    _slugify,
+)
 from sbs.models.conversation import NormalizedConversation, NormalizedMessage
-from sbs.models.extraction import ConceptItem, ExtractedKnowledge
+from sbs.models.extraction import ConceptItem, ExtractedKnowledge, ReferenceItem
 from sbs.models.note import DraftNote, NoteFrontmatter, NoteLink
 
 
@@ -111,6 +117,57 @@ class TestSynthesis:
         assert "Machine Learning" in notes[0].body
         assert "Deep Learning" in notes[0].body
 
+    def test_generate_literature_index(self):
+        convs = [
+            NormalizedConversation(
+                id="c1",
+                title="Chat 1",
+                source="chatgpt",
+                created_at="2026-01-01T00:00:00Z",
+                messages=[NormalizedMessage(role="user", content="Read this paper")],
+                raw_message_count=1,
+            )
+        ]
+        extractions = [
+            ExtractedKnowledge(
+                segment_id="c1-seg-0",
+                conversation_id="c1",
+                topic_label="Research",
+                references=[
+                    ReferenceItem(
+                        title="Attention Is All You Need",
+                        author="Vaswani et al.",
+                        year="2017",
+                        source_type="paper",
+                        mention_context="Transformer architecture reference",
+                    )
+                ],
+            )
+        ]
+
+        source_notes = _generate_source_notes(convs, extractions)
+        literature = _generate_literature_index(extractions, source_notes)
+
+        assert len(literature) == 1
+        assert literature[0].type == "literature"
+        assert "Attention Is All You Need" in literature[0].body
+        assert "[[SRC-chatgpt-c1-chat-1|SRC-chatgpt-c1]]" in literature[0].body
+
+    def test_resolve_note_type_guardrail(self):
+        ek = ExtractedKnowledge(
+            segment_id="s1",
+            conversation_id="c1",
+            topic_label="Test",
+        )
+        note_data = SynthesizedNote(
+            title="Thin note",
+            body="Too short.",
+            recommended_type="permanent",
+            tags=["test"],
+            link_candidates=[],
+        )
+        assert _resolve_note_type(note_data, ek) == "fleeting"
+
 
 class TestSegmentationShortConversation:
     @pytest.mark.asyncio
@@ -136,13 +193,18 @@ class TestSegmentationShortConversation:
         assert len(segments[0].messages) == 5
 
 
-def _make_note(note_id: str, title: str, tags: list[str] | None = None) -> DraftNote:
+def _make_note(
+    note_id: str,
+    title: str,
+    tags: list[str] | None = None,
+    note_type: str = "permanent",
+) -> DraftNote:
     fm = NoteFrontmatter(
-        type="permanent", created="2026-01-01T00:00:00Z",
+        type=note_type, created="2026-01-01T00:00:00Z",
         tags=tags or ["test"],
     )
     return DraftNote(
-        id=note_id, filename=f"{note_id}-test.md", type="permanent",
+        id=note_id, filename=f"{note_id}-test.md", type=note_type,
         title=title, frontmatter=fm, body="Content",
     )
 
@@ -161,6 +223,16 @@ class TestLinking:
 
     def test_create_mocs_empty(self):
         mocs = _create_mocs([], {})
+        assert mocs == []
+
+    def test_create_mocs_excludes_fleeting(self):
+        notes = {
+            "n1": _make_note("n1", "Permanent 1"),
+            "n2": _make_note("n2", "Permanent 2"),
+            "n3": _make_note("n3", "Fleeting", note_type="fleeting"),
+        }
+        clusters = [ClusterItem(cluster_label="Mixed", note_ids=["n1", "n2", "n3"])]
+        mocs = _create_mocs(clusters, notes)
         assert mocs == []
 
     def test_inject_links(self):
@@ -202,6 +274,13 @@ class TestValidation:
         note.frontmatter.tags = []
         issues = _check_frontmatter([note])
         assert any(i.category == "frontmatter" and "tags" in i.message for i in issues)
+
+    def test_check_frontmatter_fleeting_needs_prompts(self):
+        from sbs.agents.validation import _check_frontmatter
+        note = _make_note("f1", "Fleeting", tags=["fleeting"], note_type="fleeting")
+        note.body = "rough idea without expansion"
+        issues = _check_frontmatter([note])
+        assert any(i.category == "fleeting" for i in issues)
 
     def test_check_links_orphans(self):
         from sbs.agents.validation import _check_links

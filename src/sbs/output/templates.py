@@ -1,6 +1,8 @@
-"""Markdown templates for different note types."""
+﻿"""Markdown templates for all generated note types."""
 
 from __future__ import annotations
+
+from datetime import UTC, datetime
 
 import yaml
 
@@ -8,7 +10,7 @@ from sbs.models.note import MOC, DraftNote, NoteFrontmatter
 
 
 def render_permanent_note(note: DraftNote) -> str:
-    """Render a permanent note as Markdown with YAML frontmatter."""
+    """Render a knowledge note (permanent or fleeting) as Markdown."""
     fm = _render_frontmatter(note.frontmatter)
     lines = [fm, "", f"# {note.title}", "", note.body]
 
@@ -27,11 +29,17 @@ def render_source_note(note: DraftNote) -> str:
     return f"{fm}\n\n{note.body}\n"
 
 
+def render_literature_note(note: DraftNote) -> str:
+    """Render a literature index note as Markdown with YAML frontmatter."""
+    fm = _render_frontmatter(note.frontmatter)
+    return f"{fm}\n\n{note.body}\n"
+
+
 def render_moc(moc: MOC, note_map: dict[str, DraftNote] | None = None) -> str:
     """Render a MOC as Markdown with YAML frontmatter."""
     fm_data = {
         "type": "moc",
-        "created": moc.id,
+        "created": datetime.now(tz=UTC).isoformat(),
         "tags": ["moc"] + moc.tags,
     }
     fm = (
@@ -44,7 +52,9 @@ def render_moc(moc: MOC, note_map: dict[str, DraftNote] | None = None) -> str:
 
     if moc.body:
         lines.append(moc.body)
-    else:
+        lines.append("")
+
+    if moc.note_ids:
         lines.append("## Notes")
         for nid in moc.note_ids:
             if note_map and nid in note_map:

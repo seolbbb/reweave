@@ -7,6 +7,7 @@ from sbs.models.extraction import (
     ExtractedKnowledge,
     InsightItem,
     OpenQuestion,
+    ReferenceItem,
     TodoItem,
 )
 from sbs.models.note import MOC, DraftNote, NoteFrontmatter, NoteLink
@@ -33,6 +34,7 @@ __all__ = [
     "NoteFrontmatter",
     "OpenQuestion",
     "PipelineState",
+    "ReferenceItem",
     "Segment",
     "TodoItem",
     "TokenUsage",

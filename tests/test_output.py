@@ -6,7 +6,12 @@ from sbs.config import Config
 from sbs.models.note import MOC, DraftNote, NoteFrontmatter
 from sbs.models.pipeline import PipelineState
 from sbs.output.naming import sanitize_filename, slugify
-from sbs.output.templates import render_moc, render_permanent_note, render_source_note
+from sbs.output.templates import (
+    render_literature_note,
+    render_moc,
+    render_permanent_note,
+    render_source_note,
+)
 from sbs.output.writer import write_vault
 
 
@@ -52,6 +57,23 @@ class TestTemplates:
         assert "---" in rendered
         assert "This is the note content." in rendered
 
+    def test_render_literature_note(self):
+        note = DraftNote(
+            id="literature-index",
+            filename="Literature.md",
+            type="literature",
+            title="Literature Index",
+            frontmatter=NoteFrontmatter(
+                type="literature",
+                created="2026-01-01T00:00:00Z",
+                tags=["literature", "index"],
+            ),
+            body="# Literature Index\n\n- A referenced book",
+        )
+        rendered = render_literature_note(note)
+        assert "type: literature" in rendered
+        assert "A referenced book" in rendered
+
     def test_render_moc(self):
         moc = MOC(
             id="moc-1", title="Test MOC", filename="MOC-test.md",
@@ -62,6 +84,19 @@ class TestTemplates:
         assert "[[note-1]]" in rendered
         assert "[[note-2]]" in rendered
         assert "type: moc" in rendered
+
+    def test_render_moc_with_body_and_notes(self):
+        moc = MOC(
+            id="moc-triage",
+            title="Inbox Triage",
+            filename="MOC-inbox-triage.md",
+            note_ids=["note-1"],
+            body="## Triage Guidance\n- Refine this idea.",
+        )
+        rendered = render_moc(moc)
+        assert "## Triage Guidance" in rendered
+        assert "## Notes" in rendered
+        assert "[[note-1]]" in rendered
 
 
 class TestWriter:
@@ -77,7 +112,13 @@ class TestWriter:
             DraftNote(
                 id="n1", filename="n1-test.md", type="permanent",
                 title="Test", frontmatter=fm, body="Content",
-            )
+            ),
+            DraftNote(
+                id="f1", filename="f1-idea.md", type="fleeting",
+                title="Idea", frontmatter=NoteFrontmatter(
+                    type="fleeting", created="2026-01-01T00:00:00Z", tags=["fleeting"]
+                ), body="Rough thought",
+            ),
         ]
         state.source_notes = [
             DraftNote(
@@ -89,6 +130,18 @@ class TestWriter:
                 body="Source content",
             )
         ]
+        state.literature_notes = [
+            DraftNote(
+                id="literature-index",
+                filename="Literature.md",
+                type="literature",
+                title="Literature Index",
+                frontmatter=NoteFrontmatter(
+                    type="literature", created="2026-01-01T00:00:00Z", tags=["literature"]
+                ),
+                body="# Literature Index",
+            )
+        ]
         state.mocs = [
             MOC(id="moc-1", title="MOC", filename="MOC-test.md", note_ids=["n1"])
         ]
@@ -96,9 +149,12 @@ class TestWriter:
         write_vault(state)
 
         vault = tmp_path / "vault"
-        assert (vault / "notes" / "n1-test.md").exists()
-        assert (vault / "sources" / "s1-source.md").exists()
-        assert (vault / "mocs" / "MOC-test.md").exists()
+        assert (vault / "300_permanent" / "n1-test.md").exists()
+        assert (vault / "200_fleeting" / "f1-idea.md").exists()
+        assert (vault / "900_sources" / "s1-source.md").exists()
+        assert (vault / "500_literature" / "Literature.md").exists()
+        assert (vault / "400_mocs" / "MOC-test.md").exists()
+        assert (vault / "100_inbox" / "Run-Summary.md").exists()
 
     def test_write_vault_content(self, tmp_path):
         config = Config(output_dir=tmp_path / "vault")
@@ -116,6 +172,8 @@ class TestWriter:
 
         write_vault(state)
 
-        content = (tmp_path / "vault" / "notes" / "n1-hello.md").read_text(encoding="utf-8")
+        content = (tmp_path / "vault" / "300_permanent" / "n1-hello.md").read_text(
+            encoding="utf-8"
+        )
         assert "# Hello World" in content
         assert "Hello content" in content

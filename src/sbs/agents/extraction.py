@@ -15,6 +15,7 @@ from sbs.models.extraction import (
     ExtractedKnowledge,
     InsightItem,
     OpenQuestion,
+    ReferenceItem,
     TodoItem,
 )
 from sbs.models.segment import Segment
@@ -31,6 +32,7 @@ class ExtractionResult(BaseModel):
     insights: list[InsightItem] = Field(default_factory=list)
     todos: list[TodoItem] = Field(default_factory=list)
     open_questions: list[OpenQuestion] = Field(default_factory=list)
+    references: list[ReferenceItem] = Field(default_factory=list)
     summary: str = ""
 
 
@@ -83,5 +85,6 @@ async def _extract_single(
         insights=result.insights,
         todos=result.todos,
         open_questions=result.open_questions,
+        references=result.references,
         summary=result.summary,
     )
