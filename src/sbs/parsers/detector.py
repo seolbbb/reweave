@@ -25,16 +25,14 @@ def detect_and_parse(file_path: Path) -> list[NormalizedConversation]:
 
 
 def parse_directory(input_dir: Path) -> list[NormalizedConversation]:
-    """Parse all JSON files in a directory, auto-detecting format for each."""
+    """Parse all JSON files in a directory tree, auto-detecting format for each."""
     conversations: list[NormalizedConversation] = []
-    json_files = sorted(input_dir.glob("*.json"))
 
-    for file_path in json_files:
+    for file_path in sorted(input_dir.rglob("*.json")):
         try:
             convs = detect_and_parse(file_path)
             conversations.extend(convs)
         except (json.JSONDecodeError, ValueError):
-            # Skip files that can't be parsed
             continue
 
     return conversations
