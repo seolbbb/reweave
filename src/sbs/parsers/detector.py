@@ -39,7 +39,7 @@ def _parse_zip(zip_path: Path) -> list[NormalizedConversation]:
                     if parser.can_parse(data):
                         conversations.extend(parser.parse(data, source_path=source))
                         break
-            except (json.JSONDecodeError, ValueError):
+            except (json.JSONDecodeError, ValueError, KeyError, TypeError, AttributeError):
                 continue
     return conversations
 
@@ -52,7 +52,7 @@ def parse_directory(input_dir: Path) -> list[NormalizedConversation]:
         try:
             convs = detect_and_parse(file_path)
             conversations.extend(convs)
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError, AttributeError):
             continue
 
     for zip_path in sorted(input_dir.rglob("*.zip")):
