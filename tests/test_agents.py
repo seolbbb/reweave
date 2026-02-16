@@ -193,6 +193,36 @@ class TestSegmentationShortConversation:
         assert len(segments[0].messages) == 5
 
 
+class TestSegmentationFallback:
+    @pytest.mark.asyncio
+    async def test_long_conversation_falls_back_when_llm_fails(self):
+        from sbs.agents.segmentation import WINDOW_SIZE, segment_conversations
+        from sbs.config import Config
+
+        class FailingLLM:
+            async def cheap_structured_call(self, **_kwargs):
+                raise ValueError("Could not parse structured JSON from Google response")
+
+        conv = NormalizedConversation(
+            id="fallback-conv",
+            title="Long Chat",
+            source="chatgpt",
+            created_at="2026-01-01T00:00:00Z",
+            messages=[
+                NormalizedMessage(role="user", content=f"Message {i}")
+                for i in range(65)
+            ],
+            raw_message_count=65,
+        )
+        config = Config(concurrency=1)
+        segments = await segment_conversations([conv], FailingLLM(), config)  # type: ignore[arg-type]
+
+        assert len(segments) >= 3
+        assert segments[0].start_index == 0
+        assert segments[-1].end_index == len(conv.messages) - 1
+        assert all(len(seg.messages) <= WINDOW_SIZE for seg in segments)
+
+
 def _make_note(
     note_id: str,
     title: str,

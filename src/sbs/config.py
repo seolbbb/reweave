@@ -14,7 +14,12 @@ load_dotenv()
 PROVIDER_DEFAULT_MODELS: dict[str, tuple[str, str]] = {
     "anthropic": ("claude-sonnet-4-5-20250929", "claude-haiku-4-5-20251001"),
     "openai": ("gpt-4o", "gpt-4o-mini"),
-    "google": ("gemini-3-pro", "gemini-3-flash"),
+    "google": ("gemini-3-pro-preview", "gemini-3-flash-preview"),
+}
+
+GOOGLE_MODEL_ALIASES: dict[str, str] = {
+    "gemini-3-pro": "gemini-3-pro-preview",
+    "gemini-3-flash": "gemini-3-flash-preview",
 }
 
 
@@ -64,4 +69,9 @@ class Config(BaseModel):
             self.model = default_main
         if not self.cheap_model:
             self.cheap_model = default_cheap
+
+        # Backward compatibility for older Google model names stored in .env files.
+        if self.provider == "google":
+            self.model = GOOGLE_MODEL_ALIASES.get(self.model, self.model)
+            self.cheap_model = GOOGLE_MODEL_ALIASES.get(self.cheap_model, self.cheap_model)
         return self

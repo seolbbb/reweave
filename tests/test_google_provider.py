@@ -28,7 +28,7 @@ async def test_structured_call_parses_response(monkeypatch):
         usage_metadata = FakeUsage()
 
     async def fake_call_with_retry(**kwargs: Any) -> Any:
-        assert kwargs["model"] == "gemini-3-pro"
+        assert kwargs["model"] == "gemini-3-pro-preview"
         config = kwargs["config"]
         assert "response_schema" in config
         assert "response_json_schema" not in config
@@ -37,7 +37,7 @@ async def test_structured_call_parses_response(monkeypatch):
     monkeypatch.setattr(provider, "_call_with_retry", fake_call_with_retry)
 
     result, usage = await provider.structured_call(
-        model="gemini-3-pro",
+        model="gemini-3-pro-preview",
         system="You are a test runner",
         user="Return payload",
         schema=Payload,
@@ -46,7 +46,7 @@ async def test_structured_call_parses_response(monkeypatch):
     assert result == Payload(title="Gemini", count=3)
     assert usage.input_tokens == 12
     assert usage.output_tokens == 5
-    assert usage.model == "gemini-3-pro"
+    assert usage.model == "gemini-3-pro-preview"
 
 
 @pytest.mark.asyncio
@@ -64,7 +64,7 @@ async def test_structured_call_text_fallback(monkeypatch):
     monkeypatch.setattr(provider, "_call_with_retry", fake_call_with_retry)
 
     result, usage = await provider.structured_call(
-        model="gemini-3-pro",
+        model="gemini-3-pro-preview",
         system="sys",
         user="user",
         schema=Payload,
@@ -73,6 +73,70 @@ async def test_structured_call_text_fallback(monkeypatch):
     assert result == Payload(title="Fallback", count=1)
     assert usage.input_tokens == 0
     assert usage.output_tokens == 0
+
+
+@pytest.mark.asyncio
+async def test_structured_call_recovers_trailing_comma_json(monkeypatch):
+    provider = GoogleProvider(api_key="test-key")
+
+    class FakeResponse:
+        parsed = None
+        text = 'Result:\n```json\n{"title":"Recovered","count":2,}\n```'
+        usage_metadata = None
+
+    async def fake_call_with_retry(**_: Any) -> Any:
+        return FakeResponse()
+
+    monkeypatch.setattr(provider, "_call_with_retry", fake_call_with_retry)
+
+    result, _usage = await provider.structured_call(
+        model="gemini-3-pro-preview",
+        system="sys",
+        user="user",
+        schema=Payload,
+    )
+
+    assert result == Payload(title="Recovered", count=2)
+
+
+@pytest.mark.asyncio
+async def test_structured_call_uses_valid_candidate_part(monkeypatch):
+    provider = GoogleProvider(api_key="test-key")
+
+    class Part:
+        def __init__(self, text: str):
+            self.text = text
+
+    class Content:
+        def __init__(self, texts: list[str]):
+            self.parts = [Part(t) for t in texts]
+
+    class Candidate:
+        def __init__(self, texts: list[str]):
+            self.content = Content(texts)
+
+    class FakeResponse:
+        parsed = None
+        text = None
+        usage_metadata = None
+        candidates = [
+            Candidate(["not json"]),
+            Candidate(['{"title":"FromCandidate","count":7}']),
+        ]
+
+    async def fake_call_with_retry(**_: Any) -> Any:
+        return FakeResponse()
+
+    monkeypatch.setattr(provider, "_call_with_retry", fake_call_with_retry)
+
+    result, _usage = await provider.structured_call(
+        model="gemini-3-pro-preview",
+        system="sys",
+        user="user",
+        schema=Payload,
+    )
+
+    assert result == Payload(title="FromCandidate", count=7)
 
 
 @pytest.mark.asyncio
@@ -89,7 +153,7 @@ async def test_text_call_maps_usage_dict(monkeypatch):
     monkeypatch.setattr(provider, "_call_with_retry", fake_call_with_retry)
 
     text, usage = await provider.text_call(
-        model="gemini-3-flash",
+        model="gemini-3-flash-preview",
         system="sys",
         user="user",
     )
@@ -97,7 +161,7 @@ async def test_text_call_maps_usage_dict(monkeypatch):
     assert text == "plain text"
     assert usage.input_tokens == 9
     assert usage.output_tokens == 2
-    assert usage.model == "gemini-3-flash"
+    assert usage.model == "gemini-3-flash-preview"
 
 
 @pytest.mark.asyncio
@@ -126,7 +190,7 @@ async def test_call_with_retry_retries_on_429(monkeypatch):
     monkeypatch.setattr("sbs.llm.providers.google.asyncio.sleep", fake_sleep)
     monkeypatch.setattr(provider, "_client", FakeClient())
 
-    result = await provider._call_with_retry(model="gemini-3-flash", contents="hello")
+    result = await provider._call_with_retry(model="gemini-3-flash-preview", contents="hello")
     assert result == {"ok": True}
 
 

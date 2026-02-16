@@ -21,12 +21,12 @@ class TestCostTracking:
         assert abs(cost - expected) < 1e-10
 
     def test_estimate_gemini_pro_cost(self):
-        cost = estimate_call_cost("gemini-3-pro", 1000, 500)
+        cost = estimate_call_cost("gemini-3-pro-preview", 1000, 500)
         expected = (1000 / 1_000_000) * 3.5 + (500 / 1_000_000) * 10.5
         assert abs(cost - expected) < 1e-10
 
     def test_estimate_gemini_flash_cost(self):
-        cost = estimate_call_cost("gemini-3-flash", 1000, 500)
+        cost = estimate_call_cost("gemini-3-flash-preview", 1000, 500)
         expected = (1000 / 1_000_000) * 0.30 + (500 / 1_000_000) * 2.5
         assert abs(cost - expected) < 1e-10
 
@@ -100,8 +100,8 @@ class TestConfigDefaults:
         monkeypatch.delenv("SBS_CHEAP_MODEL", raising=False)
 
         config = Config(provider="google")
-        assert config.model == "gemini-3-pro"
-        assert config.cheap_model == "gemini-3-flash"
+        assert config.model == "gemini-3-pro-preview"
+        assert config.cheap_model == "gemini-3-flash-preview"
 
     def test_model_env_overrides_provider_defaults(self, monkeypatch):
         from sbs.config import Config
@@ -112,3 +112,13 @@ class TestConfigDefaults:
         config = Config(provider="google")
         assert config.model == "my-main"
         assert config.cheap_model == "my-cheap"
+
+    def test_google_legacy_model_aliases(self, monkeypatch):
+        from sbs.config import Config
+
+        monkeypatch.setenv("SBS_MODEL", "gemini-3-pro")
+        monkeypatch.setenv("SBS_CHEAP_MODEL", "gemini-3-flash")
+
+        config = Config(provider="google")
+        assert config.model == "gemini-3-pro-preview"
+        assert config.cheap_model == "gemini-3-flash-preview"
