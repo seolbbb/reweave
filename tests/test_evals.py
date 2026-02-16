@@ -107,3 +107,48 @@ def test_eval_tracker_leaderboard_jsonl_format(tmp_path: Path):
     assert len(lines) == 1
     data = json.loads(lines[0])
     assert data["bundle_id"] == "b1"
+
+
+def test_eval_tracker_new_run_id_is_unique(tmp_path: Path):
+    tracker = EvalTracker(tmp_path / "runs")
+    ids = {tracker.new_run_id() for _ in range(30)}
+    assert len(ids) == 30
+
+
+def test_eval_tracker_latest_for_bundle_scope(tmp_path: Path):
+    tracker = EvalTracker(tmp_path / "runs")
+    run_all_old = EvalRun(
+        run_id=tracker.new_run_id(),
+        bundle_id="base",
+        dataset_hash="dataset-a",
+        stage="all",
+        global_score=80.0,
+    )
+    run_seg = EvalRun(
+        run_id=tracker.new_run_id(),
+        bundle_id="base",
+        dataset_hash="dataset-a",
+        stage="segmentation",
+        global_score=90.0,
+    )
+    run_all_new = EvalRun(
+        run_id=tracker.new_run_id(),
+        bundle_id="base",
+        dataset_hash="dataset-b",
+        stage="all",
+        global_score=88.0,
+    )
+    tracker.save_run(run_all_old)
+    tracker.save_run(run_seg)
+    tracker.save_run(run_all_new)
+
+    matched = tracker.latest_for_bundle_scope("base", stage="all", dataset_hash="dataset-a")
+    assert matched is not None
+    assert matched.run_id == run_all_old.run_id
+
+    unmatched = tracker.latest_for_bundle_scope(
+        "base",
+        stage="validation",
+        dataset_hash="dataset-a",
+    )
+    assert unmatched is None

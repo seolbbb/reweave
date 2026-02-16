@@ -654,12 +654,21 @@ def eval_promote(
     baseline_bundle = baseline or str(registry.get("active_bundle", "default"))
 
     candidate_run = tracker.latest_for_bundle(candidate)
-    baseline_run = tracker.latest_for_bundle(baseline_bundle)
     if candidate_run is None:
         console.print(f"[red]No eval run found for candidate bundle: {candidate}[/red]")
         raise typer.Exit(1)
+
+    baseline_run = tracker.latest_for_bundle_scope(
+        baseline_bundle,
+        stage=candidate_run.stage,
+        dataset_hash=candidate_run.dataset_hash,
+    )
     if baseline_run is None:
-        console.print(f"[red]No eval run found for baseline bundle: {baseline_bundle}[/red]")
+        console.print(
+            "[red]No comparable baseline run found.[/red] "
+            f"bundle={baseline_bundle}, stage={candidate_run.stage}, "
+            f"dataset_hash={candidate_run.dataset_hash}"
+        )
         raise typer.Exit(1)
 
     decision = evaluate_promotion_gate(

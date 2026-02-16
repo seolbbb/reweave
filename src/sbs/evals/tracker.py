@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -30,7 +31,7 @@ class EvalTracker:
 
     def new_run_id(self) -> str:
         now = datetime.now(tz=UTC)
-        return now.strftime("%Y%m%d-%H%M%S")
+        return f"{now.strftime('%Y%m%d-%H%M%S-%f')}-{uuid.uuid4().hex[:8]}"
 
     def save_run(
         self,
@@ -114,6 +115,25 @@ class EvalTracker:
         for run in self.list_leaderboard(limit=limit):
             if run.bundle_id == bundle_id:
                 return run
+        return None
+
+    def latest_for_bundle_scope(
+        self,
+        bundle_id: str,
+        *,
+        stage: str | None = None,
+        dataset_hash: str | None = None,
+        limit: int = 500,
+    ) -> EvalRun | None:
+        """Return the most recent run for a bundle matching an eval scope."""
+        for run in self.list_leaderboard(limit=limit):
+            if run.bundle_id != bundle_id:
+                continue
+            if stage is not None and run.stage != stage:
+                continue
+            if dataset_hash is not None and run.dataset_hash != dataset_hash:
+                continue
+            return run
         return None
 
     def _append_leaderboard(self, run: EvalRun) -> None:
