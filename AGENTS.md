@@ -254,6 +254,18 @@ uv run ruff format src/ tests/
 
 ---
 
+## Development Workflow
+
+When implementing features or fixes, follow this workflow:
+
+1. **Branch from `dev`**: Create a feature branch (`feat/...`, `fix/...`) from `dev`
+2. **Work per feature**: Make focused changes — one logical change per commit
+3. **Test before commit**: Run `uv run pytest` and `uv run ruff check src/ tests/` before each commit
+4. **Commit with clear messages**: Use conventional commit format (e.g., `feat:`, `fix:`, `docs:`)
+5. **Create PR to `dev`**: When all commits are ready, push and open a PR targeting `dev`
+
+---
+
 ## Environment Variables
 
 See `.env.example` for the full list. Key variables:

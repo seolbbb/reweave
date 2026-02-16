@@ -1,13 +1,15 @@
 """Tests for conversation parsers."""
 
 import json
+import shutil
+import zipfile
 from pathlib import Path
 
 import pytest
 
 from sbs.parsers.chatgpt import ChatGPTParser
 from sbs.parsers.claude import ClaudeParser
-from sbs.parsers.detector import detect_and_parse, parse_directory
+from sbs.parsers.detector import _parse_zip, detect_and_parse, parse_directory
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -157,3 +159,97 @@ class TestDetector:
         assert len(convs) == 4
         sources = {c.source for c in convs}
         assert sources == {"chatgpt", "claude"}
+
+
+class TestRecursiveDirectoryParsing:
+    def test_finds_json_in_subdirectory(self, tmp_path):
+        """parse_directory should find JSON files in nested subdirectories."""
+        subdir = tmp_path / "export" / "nested"
+        subdir.mkdir(parents=True)
+        shutil.copy(FIXTURES / "chatgpt_sample.json", subdir / "conversations.json")
+
+        convs = parse_directory(tmp_path)
+        assert len(convs) == 2
+        assert all(c.source == "chatgpt" for c in convs)
+
+    def test_finds_json_at_multiple_levels(self, tmp_path):
+        """parse_directory should find JSON at root and in subdirectories."""
+        shutil.copy(FIXTURES / "chatgpt_sample.json", tmp_path / "root.json")
+        subdir = tmp_path / "sub"
+        subdir.mkdir()
+        shutil.copy(FIXTURES / "claude_sample.json", subdir / "claude.json")
+
+        convs = parse_directory(tmp_path)
+        assert len(convs) == 4
+        sources = {c.source for c in convs}
+        assert sources == {"chatgpt", "claude"}
+
+
+class TestZipParsing:
+    @pytest.fixture()
+    def chatgpt_zip(self, tmp_path):
+        """Create a zip containing chatgpt_sample.json."""
+        zip_path = tmp_path / "export.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.write(FIXTURES / "chatgpt_sample.json", "conversations.json")
+        return zip_path
+
+    @pytest.fixture()
+    def mixed_zip(self, tmp_path):
+        """Create a zip containing both ChatGPT and Claude JSON files."""
+        zip_path = tmp_path / "mixed.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.write(FIXTURES / "chatgpt_sample.json", "chatgpt/conversations.json")
+            zf.write(FIXTURES / "claude_sample.json", "claude/export.json")
+        return zip_path
+
+    def test_parse_zip_chatgpt(self, chatgpt_zip):
+        convs = _parse_zip(chatgpt_zip)
+        assert len(convs) == 2
+        assert all(c.source == "chatgpt" for c in convs)
+
+    def test_parse_zip_source_path_includes_zip_name(self, chatgpt_zip):
+        convs = _parse_zip(chatgpt_zip)
+        source_path = convs[0].metadata["source_path"]
+        assert "export.zip" in source_path
+        assert "conversations.json" in source_path
+
+    def test_parse_zip_mixed_formats(self, mixed_zip):
+        convs = _parse_zip(mixed_zip)
+        assert len(convs) == 4
+        sources = {c.source for c in convs}
+        assert sources == {"chatgpt", "claude"}
+
+    def test_parse_zip_skips_non_json(self, tmp_path):
+        """Zip files containing non-JSON entries should be silently skipped."""
+        zip_path = tmp_path / "nojson.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("readme.txt", "not json")
+        convs = _parse_zip(zip_path)
+        assert convs == []
+
+    def test_parse_zip_skips_invalid_json(self, tmp_path):
+        """Invalid JSON inside a zip should be silently skipped."""
+        zip_path = tmp_path / "bad.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("broken.json", "{not valid json}")
+        convs = _parse_zip(zip_path)
+        assert convs == []
+
+    def test_parse_directory_finds_zip(self, tmp_path, chatgpt_zip):
+        """parse_directory should discover and parse zip files."""
+        convs = parse_directory(tmp_path)
+        assert len(convs) == 2
+        assert all(c.source == "chatgpt" for c in convs)
+
+    def test_parse_directory_zip_in_subdirectory(self, tmp_path):
+        """parse_directory should find zip files in subdirectories."""
+        subdir = tmp_path / "exports"
+        subdir.mkdir()
+        zip_path = subdir / "claude.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.write(FIXTURES / "claude_sample.json", "data.json")
+
+        convs = parse_directory(tmp_path)
+        assert len(convs) == 2
+        assert all(c.source == "claude" for c in convs)
