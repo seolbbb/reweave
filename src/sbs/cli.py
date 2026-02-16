@@ -17,7 +17,9 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 prompt_app = typer.Typer(help="Prompt bundle utilities.")
+eval_app = typer.Typer(help="Prompt evaluation utilities.")
 app.add_typer(prompt_app, name="prompt")
+app.add_typer(eval_app, name="eval")
 console = Console()
 
 
@@ -272,3 +274,80 @@ def prompt_init(
     )
 
     console.print(f"[green]Prompt bundle initialized:[/green] {bundle_dir}")
+
+
+@eval_app.command("build-dataset")
+def eval_build_dataset(
+    input_dir: Annotated[
+        Path,
+        typer.Argument(help="Directory containing exported conversation JSON files."),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Output dataset directory."),
+    ] = Path("./evals/datasets"),
+    checkpoint_path: Annotated[
+        Path | None,
+        typer.Option("--checkpoint-path", help="Checkpoint file or directory to bootstrap labels."),
+    ] = None,
+    max_cases_per_stage: Annotated[
+        int,
+        typer.Option("--max-cases-per-stage", help="Max number of cases to emit per stage."),
+    ] = 80,
+) -> None:
+    """Build stage-wise evaluation datasets from local data/checkpoints."""
+    from sbs.evals.dataset_builder import build_eval_datasets
+
+    counts = build_eval_datasets(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        checkpoint_path=checkpoint_path,
+        max_cases_per_stage=max_cases_per_stage,
+    )
+
+    console.print(f"[bold]Dataset output:[/bold] {output_dir}")
+    for stage, count in counts.items():
+        console.print(f"  - {stage}: {count} cases")
+
+
+@eval_app.command("report")
+def eval_report(
+    runs_dir: Annotated[
+        Path,
+        typer.Option("--runs-dir", help="Evaluation run artifacts directory."),
+    ] = Path("./evals/runs"),
+    latest: Annotated[
+        bool,
+        typer.Option("--latest", help="Show latest run details."),
+    ] = True,
+    limit: Annotated[
+        int,
+        typer.Option("--limit", help="Leaderboard row count."),
+    ] = 10,
+) -> None:
+    """Show local evaluation leaderboard and latest run summary."""
+    from sbs.evals.tracker import EvalTracker
+
+    tracker = EvalTracker(runs_dir)
+    rows = tracker.list_leaderboard(limit=limit)
+    if not rows:
+        console.print("[yellow]No eval runs found.[/yellow]")
+        return
+
+    console.print(f"[bold]Leaderboard ({len(rows)} most recent):[/bold]")
+    for row in rows:
+        console.print(
+            f"  - {row.run_id} | bundle={row.bundle_id} | stage={row.stage} "
+            f"| score={row.global_score:.2f} | dataset={row.dataset_hash}"
+        )
+
+    if latest:
+        run = tracker.load_latest()
+        if run:
+            console.print("\n[bold]Latest run metrics:[/bold]")
+            for stage, metric in run.metrics.items():
+                console.print(
+                    f"  - {stage}: score={metric.score:.2f}, "
+                    f"pass_rate={metric.pass_rate:.2%}, "
+                    f"cases={metric.passed_cases}/{metric.total_cases}"
+                )
