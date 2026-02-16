@@ -29,6 +29,9 @@ async def test_structured_call_parses_response(monkeypatch):
 
     async def fake_call_with_retry(**kwargs: Any) -> Any:
         assert kwargs["model"] == "gemini-3-pro"
+        config = kwargs["config"]
+        assert "response_schema" in config
+        assert "response_json_schema" not in config
         return FakeResponse()
 
     monkeypatch.setattr(provider, "_call_with_retry", fake_call_with_retry)

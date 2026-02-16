@@ -38,7 +38,7 @@ class GoogleProvider:
                 "system_instruction": system,
                 "max_output_tokens": max_tokens,
                 "response_mime_type": "application/json",
-                "response_json_schema": schema.model_json_schema(),
+                "response_schema": schema.model_json_schema(),
             },
         )
 
