@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from sbs.config import Config
 from sbs.llm.client import LLMClient
-from sbs.llm.prompts import SEGMENTATION_SYSTEM, SEGMENTATION_USER
+from sbs.llm.prompts import SEGMENTATION_SYSTEM, SEGMENTATION_USER, get_prompt
 from sbs.models.conversation import NormalizedConversation, NormalizedMessage
 from sbs.models.segment import Segment
 
@@ -77,10 +77,10 @@ async def _segment_single(
 
     # Long conversations → chunk and ask LLM for topic boundaries
     formatted = _format_messages(messages)
-    user_prompt = SEGMENTATION_USER.format(messages=formatted)
+    user_prompt = get_prompt("SEGMENTATION_USER", SEGMENTATION_USER).format(messages=formatted)
 
     result, _usage = await llm.cheap_structured_call(
-        system=SEGMENTATION_SYSTEM,
+        system=get_prompt("SEGMENTATION_SYSTEM", SEGMENTATION_SYSTEM),
         user=user_prompt,
         schema=SegmentationResult,
     )

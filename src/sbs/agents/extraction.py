@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from sbs.config import Config
 from sbs.llm.client import LLMClient
-from sbs.llm.prompts import EXTRACTION_SYSTEM, EXTRACTION_USER
+from sbs.llm.prompts import EXTRACTION_SYSTEM, EXTRACTION_USER, get_prompt
 from sbs.models.extraction import (
     ConceptItem,
     DecisionItem,
@@ -65,8 +65,10 @@ async def _extract_single(
         f"{msg.role}: {msg.content}" for msg in segment.messages
     )
 
-    system = EXTRACTION_SYSTEM.format(topic_label=segment.topic_label)
-    user = EXTRACTION_USER.format(
+    system = get_prompt("EXTRACTION_SYSTEM", EXTRACTION_SYSTEM).format(
+        topic_label=segment.topic_label
+    )
+    user = get_prompt("EXTRACTION_USER", EXTRACTION_USER).format(
         topic_label=segment.topic_label, messages=messages_text
     )
 

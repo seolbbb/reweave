@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -15,6 +16,8 @@ app = typer.Typer(
     help="Convert ChatGPT/Claude conversations into a Zettelkasten-style Obsidian vault.",
     no_args_is_help=True,
 )
+prompt_app = typer.Typer(help="Prompt bundle utilities.")
+app.add_typer(prompt_app, name="prompt")
 console = Console()
 
 
@@ -56,6 +59,10 @@ def convert(
     checkpoint_dir: Annotated[
         Path, typer.Option(help="Checkpoint directory.")
     ] = Path("./.sbs-checkpoints"),
+    prompt_bundle: Annotated[
+        Path | None,
+        typer.Option(help="Prompt bundle file/directory path."),
+    ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Estimate cost only.")] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose logging.")] = False,
 ) -> None:
@@ -71,6 +78,7 @@ def convert(
         provider=provider,  # type: ignore[arg-type]
         concurrency=concurrency,
         checkpoint_dir=checkpoint_dir,
+        prompt_bundle=prompt_bundle,
         dry_run=dry_run,
         verbose=verbose,
     )
@@ -145,6 +153,10 @@ def estimate(
 @app.command()
 def resume(
     checkpoint_path: Annotated[Path, typer.Argument(help="Path to checkpoint file or directory.")],
+    prompt_bundle: Annotated[
+        Path | None,
+        typer.Option(help="Prompt bundle file/directory path override."),
+    ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
     """Resume a pipeline from a checkpoint."""
@@ -152,7 +164,7 @@ def resume(
 
     from sbs.pipeline.runner import resume_pipeline
 
-    asyncio.run(resume_pipeline(checkpoint_path, verbose=verbose))
+    asyncio.run(resume_pipeline(checkpoint_path, verbose=verbose, prompt_bundle=prompt_bundle))
 
 
 @app.command()
@@ -227,3 +239,36 @@ def validate(
         console.print("  [green]No issues found![/green]")
 
     console.print(f"  Orphan notes: {orphan_count}")
+
+
+@prompt_app.command("init")
+def prompt_init(
+    output_dir: Annotated[
+        Path, typer.Option("--output-dir", help="Prompt root directory.")
+    ] = Path("./prompts"),
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite existing bundle files."),
+    ] = False,
+) -> None:
+    """Initialize a default prompt bundle on disk."""
+    import yaml
+
+    from sbs.prompting.registry import PromptBundle, default_prompt_map, write_prompt_bundle
+
+    bundle = PromptBundle(bundle_id="default", prompts=default_prompt_map())
+    bundle_dir = output_dir / "bundles" / bundle.bundle_id
+    write_prompt_bundle(bundle, bundle_dir, overwrite=force)
+
+    registry = {
+        "active_bundle": bundle.bundle_id,
+        "updated_at": datetime.now(tz=UTC).isoformat(),
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    registry_path = output_dir / "registry.yaml"
+    registry_path.write_text(
+        yaml.safe_dump(registry, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+
+    console.print(f"[green]Prompt bundle initialized:[/green] {bundle_dir}")
