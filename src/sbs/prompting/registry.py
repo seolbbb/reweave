@@ -23,6 +23,7 @@ DEFAULT_PROMPT_KEYS_BY_STAGE: dict[str, list[str]] = {
     ],
     "validation": ["VALIDATION_ATOMICITY_SYSTEM", "VALIDATION_ATOMICITY_USER"],
 }
+REGISTRY_FILE = "registry.yaml"
 
 
 class PromptBundle(BaseModel):
@@ -58,7 +59,7 @@ def detect_default_prompt_source(cwd: Path | None = None) -> Path | None:
     if not prompts_root.exists():
         return None
 
-    registry_file = prompts_root / "registry.yaml"
+    registry_file = prompts_root / REGISTRY_FILE
     if registry_file.exists():
         registry_data = _read_yaml(registry_file)
         active_bundle = str(registry_data.get("active_bundle", "")).strip()
@@ -76,6 +77,58 @@ def detect_default_prompt_source(cwd: Path | None = None) -> Path | None:
         return default_bundle_dir
 
     return None
+
+
+def load_prompt_registry(prompts_root: Path) -> dict[str, Any]:
+    """Load prompts/registry.yaml or return default metadata."""
+    registry_path = prompts_root / REGISTRY_FILE
+    if not registry_path.exists():
+        return {"active_bundle": "default"}
+    return _read_yaml(registry_path)
+
+
+def write_prompt_registry(prompts_root: Path, active_bundle: str) -> Path:
+    """Write prompts/registry.yaml with active bundle metadata."""
+    prompts_root.mkdir(parents=True, exist_ok=True)
+    registry_path = prompts_root / REGISTRY_FILE
+    payload = {
+        "active_bundle": active_bundle,
+        "updated_at": datetime.now(tz=UTC).isoformat(),
+    }
+    registry_path.write_text(
+        yaml.safe_dump(payload, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    return registry_path
+
+
+def resolve_bundle_path(
+    bundle_ref: str | Path | None,
+    prompts_root: Path = Path("./prompts"),
+) -> Path:
+    """Resolve bundle reference to a concrete path."""
+    if bundle_ref is None:
+        source = detect_default_prompt_source()
+        if source:
+            return source
+        raise FileNotFoundError("No prompt bundle source found.")
+
+    if isinstance(bundle_ref, Path):
+        return bundle_ref
+
+    candidate_path = Path(bundle_ref)
+    if candidate_path.exists():
+        return candidate_path
+
+    if bundle_ref == "active":
+        registry = load_prompt_registry(prompts_root)
+        bundle_ref = str(registry.get("active_bundle", "default"))
+
+    bundle_dir = prompts_root / "bundles" / bundle_ref
+    if bundle_dir.exists():
+        return bundle_dir
+
+    raise FileNotFoundError(f"Prompt bundle not found: {bundle_ref}")
 
 
 def load_prompt_bundle(path: Path | None = None) -> PromptBundle:

@@ -109,6 +109,13 @@ class EvalTracker:
             rows.append(EvalRun.model_validate_json(line))
         return rows[::-1]
 
+    def latest_for_bundle(self, bundle_id: str, limit: int = 500) -> EvalRun | None:
+        """Return the most recent run for a given bundle, if any."""
+        for run in self.list_leaderboard(limit=limit):
+            if run.bundle_id == bundle_id:
+                return run
+        return None
+
     def _append_leaderboard(self, run: EvalRun) -> None:
         with self._leaderboard.open("a", encoding="utf-8") as f:
             f.write(run.model_dump_json())

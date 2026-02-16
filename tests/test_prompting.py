@@ -12,7 +12,9 @@ from sbs.prompting.registry import (
     default_prompt_map,
     detect_default_prompt_source,
     load_prompt_bundle,
+    resolve_bundle_path,
     write_prompt_bundle,
+    write_prompt_registry,
 )
 
 
@@ -73,3 +75,13 @@ def test_detect_default_prompt_source_uses_registry(tmp_path: Path):
 
     detected = detect_default_prompt_source(tmp_path)
     assert detected == bundle_dir
+
+
+def test_resolve_bundle_path_active_registry(tmp_path: Path):
+    prompts_root = tmp_path / "prompts"
+    bundle_dir = prompts_root / "bundles" / "default"
+    write_prompt_bundle(PromptBundle(prompts=default_prompt_map()), bundle_dir, overwrite=False)
+    write_prompt_registry(prompts_root, "default")
+
+    resolved = resolve_bundle_path("active", prompts_root=prompts_root)
+    assert resolved == bundle_dir

@@ -1,0 +1,14 @@
+description: SBS validation stage eval template
+providers:
+  - openai:gpt-4o-mini
+prompts:
+  - |
+    You are testing validation prompt behavior.
+    Prompt bundle path: {{env.SBS_PROMPT_BUNDLE}}
+    Input: {{input}}
+tests:
+  - vars:
+      input: "Check whether this note is atomic and self-contained."
+    assert:
+      - type: contains
+        value: "atomic"
