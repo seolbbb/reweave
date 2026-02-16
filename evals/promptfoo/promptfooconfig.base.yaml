@@ -1,0 +1,11 @@
+description: SBS prompt evaluation base template
+providers:
+  - openai:gpt-4o-mini
+prompts:
+  - "Evaluate this prompt behavior: {{input}}"
+tests:
+  - vars:
+      input: "Replace with your stage-specific test input."
+    assert:
+      - type: not-contains
+        value: "I don't know"

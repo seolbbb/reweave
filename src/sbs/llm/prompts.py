@@ -125,3 +125,23 @@ Evaluate this note for atomicity:
 Title: {title}
 Content:
 {body}"""
+
+
+# Runtime prompt overrides loaded from prompt bundles.
+_PROMPT_OVERRIDES: dict[str, str] = {}
+
+
+def set_prompt_overrides(overrides: dict[str, str] | None) -> None:
+    """Set runtime prompt overrides."""
+    global _PROMPT_OVERRIDES
+    _PROMPT_OVERRIDES = dict(overrides or {})
+
+
+def clear_prompt_overrides() -> None:
+    """Clear runtime prompt overrides."""
+    _PROMPT_OVERRIDES.clear()
+
+
+def get_prompt(name: str, default: str) -> str:
+    """Resolve a prompt template by name with fallback to default."""
+    return _PROMPT_OVERRIDES.get(name, default)

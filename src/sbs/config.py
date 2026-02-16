@@ -25,6 +25,13 @@ class Config(BaseModel):
     input_dir: Path = Field(default=Path("."))
     output_dir: Path = Field(default=Path("./vault"))
     checkpoint_dir: Path = Field(default=Path("./.sbs-checkpoints"))
+    prompt_bundle: Path | None = Field(
+        default_factory=lambda: (
+            Path(os.getenv("SBS_PROMPT_BUNDLE", ""))
+            if os.getenv("SBS_PROMPT_BUNDLE", "")
+            else None
+        )
+    )
 
     # LLM
     provider: Literal["anthropic", "openai", "google"] = Field(

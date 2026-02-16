@@ -11,9 +11,11 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from sbs.config import Config
 from sbs.llm.client import LLMClient
+from sbs.llm.prompts import set_prompt_overrides
 from sbs.models.pipeline import PipelineState
 from sbs.parsers.detector import parse_directory
 from sbs.pipeline.checkpoint import CheckpointManager
+from sbs.prompting.registry import detect_default_prompt_source, load_prompt_bundle
 
 console = Console()
 
@@ -102,11 +104,24 @@ STAGES: list[tuple[str, StageFunc]] = [
 ]
 
 
+def _apply_prompt_bundle(config: Config) -> None:
+    """Load prompt bundle and apply runtime overrides."""
+    source = config.prompt_bundle or detect_default_prompt_source()
+    if source is None:
+        set_prompt_overrides(None)
+        return
+
+    bundle = load_prompt_bundle(source)
+    set_prompt_overrides(bundle.prompts)
+    console.print(f"  Prompt bundle: [bold]{bundle.bundle_id}[/bold] ({source})")
+
+
 async def run_pipeline(config: Config) -> PipelineState:
     """Run the full conversion pipeline."""
     console.print("[bold green]SBS Pipeline Started[/bold green]")
     console.print(f"  Provider: {config.provider} | Model: {config.model}")
     console.print(f"  Input: {config.input_dir} -> Output: {config.output_dir}")
+    _apply_prompt_bundle(config)
 
     if config.dry_run:
         conversations = parse_directory(config.input_dir)
@@ -160,7 +175,11 @@ async def run_pipeline(config: Config) -> PipelineState:
     return state
 
 
-async def resume_pipeline(checkpoint_path: Path, verbose: bool = False) -> PipelineState:
+async def resume_pipeline(
+    checkpoint_path: Path,
+    verbose: bool = False,
+    prompt_bundle: Path | None = None,
+) -> PipelineState:
     """Resume pipeline from a checkpoint."""
     checkpoint_mgr = CheckpointManager(
         checkpoint_path if checkpoint_path.is_dir() else checkpoint_path.parent
@@ -172,6 +191,9 @@ async def resume_pipeline(checkpoint_path: Path, verbose: bool = False) -> Pipel
 
     if verbose:
         state.config.verbose = True
+    if prompt_bundle is not None:
+        state.config.prompt_bundle = prompt_bundle
+    _apply_prompt_bundle(state.config)
 
     llm = LLMClient(state.config, cost_summary=state.cost)
 

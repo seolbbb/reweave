@@ -7,7 +7,7 @@ import random
 from pydantic import BaseModel
 
 from sbs.llm.client import LLMClient
-from sbs.llm.prompts import VALIDATION_ATOMICITY_SYSTEM, VALIDATION_ATOMICITY_USER
+from sbs.llm.prompts import VALIDATION_ATOMICITY_SYSTEM, VALIDATION_ATOMICITY_USER, get_prompt
 from sbs.models.note import DraftNote
 from sbs.models.pipeline import PipelineState, ValidationIssue, ValidationReport
 
@@ -209,10 +209,12 @@ async def _check_atomicity(notes: list[DraftNote], llm: LLMClient) -> float:
 
     passed = 0
     for note in sample:
-        user_prompt = VALIDATION_ATOMICITY_USER.format(title=note.title, body=note.body)
+        user_prompt = get_prompt("VALIDATION_ATOMICITY_USER", VALIDATION_ATOMICITY_USER).format(
+            title=note.title, body=note.body
+        )
         try:
             result, _usage = await llm.cheap_structured_call(
-                system=VALIDATION_ATOMICITY_SYSTEM,
+                system=get_prompt("VALIDATION_ATOMICITY_SYSTEM", VALIDATION_ATOMICITY_SYSTEM),
                 user=user_prompt,
                 schema=AtomicityResult,
             )

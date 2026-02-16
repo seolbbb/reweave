@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from sbs.config import Config
 from sbs.llm.client import LLMClient
-from sbs.llm.prompts import SYNTHESIS_SYSTEM, SYNTHESIS_USER
+from sbs.llm.prompts import SYNTHESIS_SYSTEM, SYNTHESIS_USER, get_prompt
 from sbs.models.conversation import NormalizedConversation
 from sbs.models.extraction import ExtractedKnowledge
 from sbs.models.note import DraftNote, NoteFrontmatter
@@ -95,7 +95,7 @@ async def _synthesize_single(
         for r in ek.references
     ) or "None"
 
-    user_prompt = SYNTHESIS_USER.format(
+    user_prompt = get_prompt("SYNTHESIS_USER", SYNTHESIS_USER).format(
         topic_label=ek.topic_label,
         summary=ek.summary,
         concepts=concepts_text,
@@ -107,7 +107,7 @@ async def _synthesize_single(
     )
 
     result, _usage = await llm.main_structured_call(
-        system=SYNTHESIS_SYSTEM,
+        system=get_prompt("SYNTHESIS_SYSTEM", SYNTHESIS_SYSTEM),
         user=user_prompt,
         schema=SynthesisResult,
     )

@@ -13,6 +13,7 @@ from sbs.llm.prompts import (
     LINKING_CLUSTER_USER,
     LINKING_DISCOVER_SYSTEM,
     LINKING_DISCOVER_USER,
+    get_prompt,
 )
 from sbs.models.note import MOC, DraftNote, NoteLink
 
@@ -106,10 +107,12 @@ async def _cluster_notes(
         f"- ID: {n.id} | Title: {n.title} | Tags: {', '.join(n.frontmatter.tags)}"
         for n in notes
     )
-    user_prompt = LINKING_CLUSTER_USER.format(notes_summary=notes_summary)
+    user_prompt = get_prompt("LINKING_CLUSTER_USER", LINKING_CLUSTER_USER).format(
+        notes_summary=notes_summary
+    )
 
     result, _usage = await llm.cheap_structured_call(
-        system=LINKING_CLUSTER_SYSTEM,
+        system=get_prompt("LINKING_CLUSTER_SYSTEM", LINKING_CLUSTER_SYSTEM),
         user=user_prompt,
         schema=ClusteringResult,
     )
@@ -130,12 +133,12 @@ async def _discover_links(
         else f"### {n.id}: {n.title}\n{n.body}"
         for n in notes
     )
-    user_prompt = LINKING_DISCOVER_USER.format(
+    user_prompt = get_prompt("LINKING_DISCOVER_USER", LINKING_DISCOVER_USER).format(
         cluster_label=cluster_label, notes_detail=notes_detail
     )
 
     result, _usage = await llm.main_structured_call(
-        system=LINKING_DISCOVER_SYSTEM,
+        system=get_prompt("LINKING_DISCOVER_SYSTEM", LINKING_DISCOVER_SYSTEM),
         user=user_prompt,
         schema=LinkDiscoveryResult,
     )

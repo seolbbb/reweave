@@ -1,6 +1,7 @@
 """Data models for the SBS pipeline."""
 
 from sbs.models.conversation import NormalizedConversation, NormalizedMessage
+from sbs.models.evals import EvalCase, EvalRun, PromotionDecision, StageMetrics
 from sbs.models.extraction import (
     ConceptItem,
     DecisionItem,
@@ -25,6 +26,8 @@ __all__ = [
     "CostSummary",
     "DecisionItem",
     "DraftNote",
+    "EvalCase",
+    "EvalRun",
     "ExtractedKnowledge",
     "InsightItem",
     "MOC",
@@ -34,10 +37,12 @@ __all__ = [
     "NoteFrontmatter",
     "OpenQuestion",
     "PipelineState",
+    "PromotionDecision",
     "ReferenceItem",
     "Segment",
     "TodoItem",
     "TokenUsage",
+    "StageMetrics",
     "ValidationIssue",
     "ValidationReport",
 ]

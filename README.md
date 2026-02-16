@@ -56,6 +56,45 @@ uv run ruff format src/ tests/
 - `sbs estimate <input_dir>`: estimate token usage and cost
 - `sbs resume <checkpoint_path>`: resume from checkpoint
 - `sbs validate <vault_dir>`: deterministic vault validation
+- `sbs prompt init`: scaffold `prompts/` with a default bundle + active registry
+- `sbs eval build-dataset <input_dir>`: generate stage-wise JSONL eval datasets
+- `sbs eval run --bundle active --stage all`: run prompt evals via Promptfoo and store local artifacts
+- `sbs eval tune --bundle active`: generate candidate bundles and optionally auto-evaluate
+- `sbs eval promote --candidate <bundle_id>`: promote candidate when quality gate passes
+
+## Prompt Automation Workflow
+
+1. Initialize prompt bundles:
+
+```bash
+uv run sbs prompt init
+```
+
+2. Build datasets from your local exports/checkpoints:
+
+```bash
+uv run sbs eval build-dataset data/ --checkpoint-path .sbs-checkpoints
+```
+
+3. Run baseline eval:
+
+```bash
+uv run sbs eval run --bundle active --stage all
+```
+
+4. Generate candidates + auto-evaluate:
+
+```bash
+uv run sbs eval tune --bundle active --iterations 1 --candidates 8
+```
+
+5. Promote candidate bundle (manual gate):
+
+```bash
+uv run sbs eval promote --candidate <candidate_bundle_id>
+```
+
+Run artifacts are stored in `evals/runs/` with leaderboard snapshots and per-run metrics.
 
 ## Requirements
 
