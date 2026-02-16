@@ -58,6 +58,21 @@ def convert(
     model: Annotated[str | None, typer.Option(help="Main model name.")] = None,
     cheap_model: Annotated[str | None, typer.Option(help="Cheap model name.")] = None,
     concurrency: Annotated[int, typer.Option(help="Max concurrent LLM calls.")] = 3,
+    stage1_batch_enabled: Annotated[
+        bool,
+        typer.Option(
+            "--stage1-batch/--no-stage1-batch",
+            help="Enable Stage 1 micro-batching for long conversations.",
+        ),
+    ] = True,
+    stage1_batch_max_items: Annotated[
+        int,
+        typer.Option(help="Max conversations per Stage 1 micro-batch."),
+    ] = 4,
+    stage1_batch_token_budget: Annotated[
+        int,
+        typer.Option(help="Input token budget per Stage 1 micro-batch."),
+    ] = 12000,
     checkpoint_dir: Annotated[
         Path, typer.Option(help="Checkpoint directory.")
     ] = Path("./.sbs-checkpoints"),
@@ -79,6 +94,9 @@ def convert(
         output_dir=output,
         provider=provider,  # type: ignore[arg-type]
         concurrency=concurrency,
+        stage1_batch_enabled=stage1_batch_enabled,
+        stage1_batch_max_items=stage1_batch_max_items,
+        stage1_batch_input_token_budget=stage1_batch_token_budget,
         checkpoint_dir=checkpoint_dir,
         prompt_bundle=prompt_bundle,
         dry_run=dry_run,

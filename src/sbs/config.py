@@ -45,6 +45,10 @@ class Config(BaseModel):
     model: str = Field(default_factory=lambda: os.getenv("SBS_MODEL", ""))
     cheap_model: str = Field(default_factory=lambda: os.getenv("SBS_CHEAP_MODEL", ""))
     concurrency: int = Field(default=3, ge=1, le=20)
+    stage1_batch_enabled: bool = Field(default=True)
+    stage1_batch_max_items: int = Field(default=4, ge=1, le=20)
+    stage1_batch_input_token_budget: int = Field(default=12000, ge=1000, le=200000)
+    stage1_batch_split_retries: int = Field(default=3, ge=0, le=10)
 
     # API keys (resolved at runtime)
     anthropic_api_key: str = Field(
