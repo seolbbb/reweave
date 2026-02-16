@@ -20,6 +20,16 @@ class TestCostTracking:
         expected = (1000 / 1_000_000) * 2.50 + (500 / 1_000_000) * 10.0
         assert abs(cost - expected) < 1e-10
 
+    def test_estimate_gemini_pro_cost(self):
+        cost = estimate_call_cost("gemini-3-pro", 1000, 500)
+        expected = (1000 / 1_000_000) * 3.5 + (500 / 1_000_000) * 10.5
+        assert abs(cost - expected) < 1e-10
+
+    def test_estimate_gemini_flash_cost(self):
+        cost = estimate_call_cost("gemini-3-flash", 1000, 500)
+        expected = (1000 / 1_000_000) * 0.30 + (500 / 1_000_000) * 2.5
+        assert abs(cost - expected) < 1e-10
+
     def test_unknown_model_defaults(self):
         cost = estimate_call_cost("unknown-model", 1000, 500)
         # Should default to Sonnet pricing
@@ -62,6 +72,15 @@ class TestLLMClientInit:
         client = LLMClient(config)
         assert client._config.provider == "openai"
 
+    def test_create_google_client(self):
+        from sbs.config import Config
+
+        config = Config(provider="google", google_api_key="test-key")
+        from sbs.llm.client import LLMClient
+
+        client = LLMClient(config)
+        assert client._config.provider == "google"
+
     def test_shared_cost_summary(self):
         from sbs.config import Config
 
@@ -71,3 +90,25 @@ class TestLLMClientInit:
 
         client = LLMClient(config, cost_summary=cost)
         assert client.cost is cost
+
+
+class TestConfigDefaults:
+    def test_google_provider_defaults(self, monkeypatch):
+        from sbs.config import Config
+
+        monkeypatch.delenv("SBS_MODEL", raising=False)
+        monkeypatch.delenv("SBS_CHEAP_MODEL", raising=False)
+
+        config = Config(provider="google")
+        assert config.model == "gemini-3-pro"
+        assert config.cheap_model == "gemini-3-flash"
+
+    def test_model_env_overrides_provider_defaults(self, monkeypatch):
+        from sbs.config import Config
+
+        monkeypatch.setenv("SBS_MODEL", "my-main")
+        monkeypatch.setenv("SBS_CHEAP_MODEL", "my-cheap")
+
+        config = Config(provider="google")
+        assert config.model == "my-main"
+        assert config.cheap_model == "my-cheap"

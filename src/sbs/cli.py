@@ -47,7 +47,9 @@ def convert(
     output: Annotated[
         Path, typer.Option("-o", "--output", help="Output vault directory.")
     ] = Path("./vault"),
-    provider: Annotated[str, typer.Option(help="LLM provider: anthropic | openai")] = "anthropic",
+    provider: Annotated[
+        str, typer.Option(help="LLM provider: anthropic | openai | google")
+    ] = "anthropic",
     model: Annotated[str | None, typer.Option(help="Main model name.")] = None,
     cheap_model: Annotated[str | None, typer.Option(help="Cheap model name.")] = None,
     concurrency: Annotated[int, typer.Option(help="Max concurrent LLM calls.")] = 3,
@@ -85,7 +87,9 @@ def estimate(
     input_dir: Annotated[
         Path, typer.Argument(help="Directory containing exported conversation JSON files.")
     ],
-    provider: Annotated[str, typer.Option(help="LLM provider for cost estimation.")] = "anthropic",
+    provider: Annotated[
+        str, typer.Option(help="LLM provider: anthropic | openai | google")
+    ] = "anthropic",
     model: Annotated[str | None, typer.Option(help="Main model name.")] = None,
     cheap_model: Annotated[str | None, typer.Option(help="Cheap model name.")] = None,
 ) -> None:
