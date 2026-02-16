@@ -12,6 +12,9 @@ PRICING: dict[str, tuple[float, float]] = {
     # OpenAI
     "gpt-4o": (2.50, 10.0),
     "gpt-4o-mini": (0.15, 0.60),
+    # Google
+    "gemini-3-pro": (3.5, 10.5),
+    "gemini-3-flash": (0.30, 2.50),
 }
 
 

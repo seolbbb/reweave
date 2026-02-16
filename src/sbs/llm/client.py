@@ -30,6 +30,10 @@ class LLMClient:
             from sbs.llm.providers.openai import OpenAIProvider
 
             return OpenAIProvider(api_key=self._config.openai_api_key)
+        elif self._config.provider == "google":
+            from sbs.llm.providers.google import GoogleProvider
+
+            return GoogleProvider(api_key=self._config.google_api_key)
         else:
             raise ValueError(f"Unknown provider: {self._config.provider}")
 
