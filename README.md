@@ -39,6 +39,7 @@ vault/
 uv sync
 uv run sbs --help
 uv run sbs convert ./input-dir -o ./vault --provider anthropic
+uv run sbs convert ./input-dir -o ./vault --provider google
 ```
 
 ## Test and Lint
@@ -63,3 +64,4 @@ uv run ruff format src/ tests/
 - One provider key:
   - `ANTHROPIC_API_KEY`
   - `OPENAI_API_KEY`
+  - `GOOGLE_API_KEY`
