@@ -57,7 +57,9 @@ def convert(
     ] = "anthropic",
     model: Annotated[str | None, typer.Option(help="Main model name.")] = None,
     cheap_model: Annotated[str | None, typer.Option(help="Cheap model name.")] = None,
-    concurrency: Annotated[int, typer.Option(help="Max concurrent LLM calls.")] = 3,
+    concurrency: Annotated[
+        int | None, typer.Option(help="Max concurrent LLM calls (provider default if omitted).")
+    ] = None,
     stage1_batch_enabled: Annotated[
         bool,
         typer.Option(
@@ -124,10 +126,8 @@ def convert(
     """Parse conversations and generate an Obsidian vault."""
     import asyncio
 
-    from sbs.config import _DEFAULT_CONCURRENCY, Config  # noqa: I001
+    from sbs.config import Config
     from sbs.pipeline.runner import run_pipeline
-
-    concurrency_explicit = concurrency != _DEFAULT_CONCURRENCY
 
     config = Config(
         input_dir=input_dir,
@@ -150,13 +150,6 @@ def convert(
         dry_run=dry_run,
         verbose=verbose,
     )
-    config._concurrency_explicit = concurrency_explicit
-    if not concurrency_explicit:
-        from sbs.config import _PROVIDER_CONCURRENCY_DEFAULTS
-
-        config.concurrency = _PROVIDER_CONCURRENCY_DEFAULTS.get(
-            config.provider, _DEFAULT_CONCURRENCY
-        )
     if model:
         config.model = model
     if cheap_model:

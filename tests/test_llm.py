@@ -122,3 +122,16 @@ class TestConfigDefaults:
         config = Config(provider="google")
         assert config.model == "gemini-3-pro-preview"
         assert config.cheap_model == "gemini-3-flash-preview"
+
+    def test_provider_default_concurrency_when_omitted(self):
+        from sbs.config import Config
+
+        assert Config(provider="anthropic").concurrency == 10
+        assert Config(provider="openai").concurrency == 15
+        assert Config(provider="google").concurrency == 15
+
+    def test_explicit_concurrency_is_preserved(self):
+        from sbs.config import Config
+
+        assert Config(provider="openai", concurrency=3).concurrency == 3
+        assert Config(provider="anthropic", concurrency=7).concurrency == 7

@@ -53,8 +53,7 @@ class Config(BaseModel):
     )
     model: str = Field(default_factory=lambda: os.getenv("SBS_MODEL", ""))
     cheap_model: str = Field(default_factory=lambda: os.getenv("SBS_CHEAP_MODEL", ""))
-    concurrency: int = Field(default=_DEFAULT_CONCURRENCY, ge=1, le=50)
-    _concurrency_explicit: bool = False
+    concurrency: int | None = Field(default=None, ge=1, le=50)
 
     # Stage 1 micro-batching
     stage1_batch_enabled: bool = Field(default=True)
@@ -105,8 +104,8 @@ class Config(BaseModel):
             self.model = GOOGLE_MODEL_ALIASES.get(self.model, self.model)
             self.cheap_model = GOOGLE_MODEL_ALIASES.get(self.cheap_model, self.cheap_model)
 
-        # Apply provider-aware concurrency when user didn't set --concurrency
-        if not self._concurrency_explicit:
+        # Apply provider-aware concurrency when caller did not provide an override.
+        if self.concurrency is None:
             self.concurrency = _PROVIDER_CONCURRENCY_DEFAULTS.get(
                 self.provider, _DEFAULT_CONCURRENCY
             )
@@ -117,10 +116,12 @@ class Config(BaseModel):
         """Resolve effective concurrency for Stage 2."""
         if self.stage2_concurrency is not None:
             return self.stage2_concurrency
+        assert self.concurrency is not None
         return self.concurrency
 
     def resolve_stage3_concurrency(self) -> int:
         """Resolve effective concurrency for Stage 3."""
         if self.stage3_concurrency is not None:
             return self.stage3_concurrency
+        assert self.concurrency is not None
         return self.concurrency
