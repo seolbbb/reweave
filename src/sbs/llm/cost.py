@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sbs.models.pipeline import CostSummary, TokenUsage
 
-# Pricing per 1M tokens (USD) — as of early 2026
+# Pricing per 1M tokens (USD) as of early 2026
 PRICING: dict[str, tuple[float, float]] = {
     # Anthropic: (input_per_1M, output_per_1M)
     "claude-sonnet-4-5-20250929": (3.0, 15.0),
@@ -13,8 +13,13 @@ PRICING: dict[str, tuple[float, float]] = {
     "gpt-4o": (2.50, 10.0),
     "gpt-4o-mini": (0.15, 0.60),
     # Google
+    "gemini-3-pro-preview": (3.5, 10.5),
+    "gemini-3-flash-preview": (0.30, 2.50),
+    # Compatibility aliases
     "gemini-3-pro": (3.5, 10.5),
     "gemini-3-flash": (0.30, 2.50),
+    "gemini-2.5-pro": (3.5, 10.5),
+    "gemini-2.5-flash": (0.30, 2.50),
 }
 
 
@@ -30,7 +35,7 @@ def track_usage(
     cost_summary: CostSummary, model: str, input_tokens: int, output_tokens: int
 ) -> None:
     """Record a single LLM call's usage into the cost summary."""
-    usage = TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens, model=model)
+    usage = TokenUsage(model=model, input_tokens=input_tokens, output_tokens=output_tokens)
     cost_summary.calls.append(usage)
     cost_summary.total_input_tokens += input_tokens
     cost_summary.total_output_tokens += output_tokens

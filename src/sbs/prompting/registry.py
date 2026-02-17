@@ -12,7 +12,12 @@ from pydantic import BaseModel, Field
 from sbs.llm import prompts as prompt_module
 
 DEFAULT_PROMPT_KEYS_BY_STAGE: dict[str, list[str]] = {
-    "segmentation": ["SEGMENTATION_SYSTEM", "SEGMENTATION_USER"],
+    "segmentation": [
+        "SEGMENTATION_SYSTEM",
+        "SEGMENTATION_USER",
+        "SEGMENTATION_BATCH_SYSTEM",
+        "SEGMENTATION_BATCH_USER",
+    ],
     "extraction": ["EXTRACTION_SYSTEM", "EXTRACTION_USER"],
     "synthesis": ["SYNTHESIS_SYSTEM", "SYNTHESIS_USER"],
     "linking": [
@@ -39,6 +44,8 @@ def default_prompt_map() -> dict[str, str]:
     return {
         "SEGMENTATION_SYSTEM": prompt_module.SEGMENTATION_SYSTEM,
         "SEGMENTATION_USER": prompt_module.SEGMENTATION_USER,
+        "SEGMENTATION_BATCH_SYSTEM": prompt_module.SEGMENTATION_BATCH_SYSTEM,
+        "SEGMENTATION_BATCH_USER": prompt_module.SEGMENTATION_BATCH_USER,
         "EXTRACTION_SYSTEM": prompt_module.EXTRACTION_SYSTEM,
         "EXTRACTION_USER": prompt_module.EXTRACTION_USER,
         "SYNTHESIS_SYSTEM": prompt_module.SYNTHESIS_SYSTEM,

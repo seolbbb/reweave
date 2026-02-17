@@ -57,7 +57,62 @@ def convert(
     ] = "anthropic",
     model: Annotated[str | None, typer.Option(help="Main model name.")] = None,
     cheap_model: Annotated[str | None, typer.Option(help="Cheap model name.")] = None,
-    concurrency: Annotated[int, typer.Option(help="Max concurrent LLM calls.")] = 3,
+    concurrency: Annotated[
+        int | None, typer.Option(help="Max concurrent LLM calls (provider default if omitted).")
+    ] = None,
+    stage1_batch_enabled: Annotated[
+        bool,
+        typer.Option(
+            "--stage1-batch/--no-stage1-batch",
+            help="Enable Stage 1 micro-batching for long conversations.",
+        ),
+    ] = True,
+    stage1_batch_max_items: Annotated[
+        int,
+        typer.Option(help="Max conversations per Stage 1 micro-batch."),
+    ] = 4,
+    stage1_batch_token_budget: Annotated[
+        int,
+        typer.Option(help="Input token budget per Stage 1 micro-batch."),
+    ] = 12000,
+    stage2_concurrency: Annotated[
+        int | None,
+        typer.Option("--stage2-concurrency", help="Override concurrency for Stage 2 (extraction)."),
+    ] = None,
+    stage3_concurrency: Annotated[
+        int | None,
+        typer.Option("--stage3-concurrency", help="Override concurrency for Stage 3 (synthesis)."),
+    ] = None,
+    stage2_batch_enabled: Annotated[
+        bool,
+        typer.Option(
+            "--stage2-batch/--no-stage2-batch",
+            help="Enable Stage 2 micro-batching.",
+        ),
+    ] = False,
+    stage2_batch_max_items: Annotated[
+        int,
+        typer.Option(help="Max segments per Stage 2 micro-batch."),
+    ] = 8,
+    stage2_batch_token_budget: Annotated[
+        int,
+        typer.Option(help="Input token budget per Stage 2 micro-batch."),
+    ] = 20000,
+    stage3_batch_enabled: Annotated[
+        bool,
+        typer.Option(
+            "--stage3-batch/--no-stage3-batch",
+            help="Enable Stage 3 micro-batching.",
+        ),
+    ] = False,
+    stage3_batch_max_items: Annotated[
+        int,
+        typer.Option(help="Max extractions per Stage 3 micro-batch."),
+    ] = 6,
+    stage3_batch_token_budget: Annotated[
+        int,
+        typer.Option(help="Input token budget per Stage 3 micro-batch."),
+    ] = 24000,
     checkpoint_dir: Annotated[
         Path, typer.Option(help="Checkpoint directory.")
     ] = Path("./.sbs-checkpoints"),
@@ -79,6 +134,17 @@ def convert(
         output_dir=output,
         provider=provider,  # type: ignore[arg-type]
         concurrency=concurrency,
+        stage1_batch_enabled=stage1_batch_enabled,
+        stage1_batch_max_items=stage1_batch_max_items,
+        stage1_batch_input_token_budget=stage1_batch_token_budget,
+        stage2_concurrency=stage2_concurrency,
+        stage3_concurrency=stage3_concurrency,
+        stage2_batch_enabled=stage2_batch_enabled,
+        stage2_batch_max_items=stage2_batch_max_items,
+        stage2_batch_input_token_budget=stage2_batch_token_budget,
+        stage3_batch_enabled=stage3_batch_enabled,
+        stage3_batch_max_items=stage3_batch_max_items,
+        stage3_batch_input_token_budget=stage3_batch_token_budget,
         checkpoint_dir=checkpoint_dir,
         prompt_bundle=prompt_bundle,
         dry_run=dry_run,

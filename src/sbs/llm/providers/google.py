@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
+import re
 from typing import Any
 
 from pydantic import BaseModel
@@ -66,11 +68,11 @@ class GoogleProvider:
         text = self._extract_text(response)
         return text, self._build_usage(response, model)
 
-    async def _call_with_retry(self, *, max_retries: int = 3, **kwargs: Any) -> Any:
-        """Call the API with exponential backoff retry."""
+    async def _call_with_retry(self, *, max_retries: int = 5, **kwargs: Any) -> Any:
+        """Call the API with exponential backoff + jitter retry."""
         from google.genai import errors
 
-        delays = [1, 4, 16]
+        delays = [1, 2, 4, 8, 16]
         last_error: Exception | None = None
 
         for attempt in range(max_retries):
@@ -81,11 +83,20 @@ class GoogleProvider:
                 status = getattr(e, "status", None)
                 code = getattr(e, "code", None)
                 status_code = status if isinstance(status, int) else code
+                if status_code == 404:
+                    model = kwargs.get("model", "")
+                    raise ValueError(
+                        f"Google model '{model}' was not found for generateContent. "
+                        "Use an available model such as 'gemini-3-pro-preview' (main) and "
+                        "'gemini-3-flash-preview' (cheap), or set --model/--cheap-model explicitly."
+                    ) from e
                 should_retry = isinstance(status_code, int) and (
                     status_code == 429 or status_code >= 500
                 )
                 if should_retry and attempt < max_retries - 1:
-                    await asyncio.sleep(delays[attempt])
+                    delay = delays[min(attempt, len(delays) - 1)]
+                    jitter = random.uniform(0, delay)  # noqa: S311
+                    await asyncio.sleep(delay + jitter)
                     continue
                 raise
 
@@ -101,32 +112,129 @@ class GoogleProvider:
             if isinstance(parsed, dict):
                 return parsed
             if isinstance(parsed, str):
-                return json.loads(parsed)
+                parsed_obj = GoogleProvider._parse_json_object(parsed)
+                if parsed_obj is not None:
+                    return parsed_obj
             if hasattr(parsed, "model_dump"):
                 return parsed.model_dump()  # type: ignore[no-any-return]
 
-        text = GoogleProvider._extract_text(response)
-        if not text:
-            raise ValueError("No structured JSON result found in Google response")
+        texts = GoogleProvider._collect_text_candidates(response)
+        for text in texts:
+            parsed_obj = GoogleProvider._parse_json_object(text)
+            if parsed_obj is not None:
+                return parsed_obj
 
-        return json.loads(GoogleProvider._strip_code_fences(text))
+        if not texts:
+            raise ValueError("No structured JSON result found in Google response")
+        snippet = texts[0].replace("\n", " ")[:280]
+        raise ValueError(f"Could not parse structured JSON from Google response: {snippet}")
 
     @staticmethod
     def _extract_text(response: Any) -> str:
         """Extract text from response, including candidate fallback."""
-        text = getattr(response, "text", None)
-        if isinstance(text, str) and text:
-            return text
+        texts = GoogleProvider._collect_text_candidates(response)
+        return texts[0] if texts else ""
 
-        parts_text: list[str] = []
+    @staticmethod
+    def _collect_text_candidates(response: Any) -> list[str]:
+        """Collect possible text payloads in parse priority order."""
+        candidates: list[str] = []
+
+        primary_text = getattr(response, "text", None)
+        if isinstance(primary_text, str) and primary_text.strip():
+            candidates.append(primary_text)
+
         for candidate in getattr(response, "candidates", []) or []:
             content = getattr(candidate, "content", None)
+            part_texts: list[str] = []
             for part in getattr(content, "parts", []) or []:
                 part_text = getattr(part, "text", None)
-                if isinstance(part_text, str):
-                    parts_text.append(part_text)
+                if isinstance(part_text, str) and part_text.strip():
+                    part_texts.append(part_text)
+                    candidates.append(part_text)
+            if part_texts:
+                candidates.append("".join(part_texts))
 
-        return "".join(parts_text)
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for item in candidates:
+            trimmed = item.strip()
+            if not trimmed or trimmed in seen:
+                continue
+            seen.add(trimmed)
+            deduped.append(trimmed)
+        return deduped
+
+    @staticmethod
+    def _parse_json_object(text: str) -> dict[str, Any] | None:
+        """Parse a JSON object from model output with light recovery heuristics."""
+        cleaned = GoogleProvider._strip_code_fences(text).strip()
+        if not cleaned:
+            return None
+
+        attempts: list[str] = [cleaned]
+
+        extracted = GoogleProvider._extract_first_json_object(cleaned)
+        if extracted is not None and extracted != cleaned:
+            attempts.append(extracted)
+
+        for candidate in list(attempts):
+            normalized = GoogleProvider._remove_trailing_commas(candidate)
+            if normalized != candidate:
+                attempts.append(normalized)
+
+        seen: set[str] = set()
+        for candidate in attempts:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            try:
+                parsed = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+        return None
+
+    @staticmethod
+    def _extract_first_json_object(text: str) -> str | None:
+        """Extract the first balanced JSON object in a text blob."""
+        start: int | None = None
+        depth = 0
+        in_string = False
+        escaped = False
+
+        for idx, ch in enumerate(text):
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+
+            if ch == '"':
+                in_string = True
+                continue
+
+            if ch == "{":
+                if depth == 0:
+                    start = idx
+                depth += 1
+                continue
+
+            if ch == "}" and depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    return text[start : idx + 1]
+
+        return None
+
+    @staticmethod
+    def _remove_trailing_commas(text: str) -> str:
+        """Remove trailing commas before closing braces/brackets."""
+        return re.sub(r",\s*([}\]])", r"\1", text)
 
     @staticmethod
     def _strip_code_fences(text: str) -> str:

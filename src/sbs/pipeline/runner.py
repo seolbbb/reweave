@@ -5,9 +5,18 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from time import perf_counter
 
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 
 from sbs.config import Config
 from sbs.llm.client import LLMClient
@@ -15,45 +24,54 @@ from sbs.llm.prompts import set_prompt_overrides
 from sbs.models.pipeline import PipelineState
 from sbs.parsers.detector import parse_directory
 from sbs.pipeline.checkpoint import CheckpointManager
+from sbs.pipeline.progress import StageProgress
 from sbs.prompting.registry import detect_default_prompt_source, load_prompt_bundle
 
 console = Console()
 
 # Type alias for a pipeline stage function
-StageFunc = Callable[[PipelineState, LLMClient], Awaitable[None]]
+StageFunc = Callable[[PipelineState, LLMClient, StageProgress | None], Awaitable[None]]
 
 
-async def _stage_0_parse(state: PipelineState, _llm: LLMClient) -> None:
+async def _stage_0_parse(
+    state: PipelineState, _llm: LLMClient, _progress: StageProgress | None
+) -> None:
     """Stage 0: Parse input files into normalized conversations."""
     conversations = parse_directory(state.config.input_dir)
     state.conversations = conversations
     console.print(f"  Parsed [bold]{len(conversations)}[/bold] conversations")
 
 
-async def _stage_1_segment(state: PipelineState, llm: LLMClient) -> None:
+async def _stage_1_segment(
+    state: PipelineState, llm: LLMClient, progress: StageProgress | None
+) -> None:
     """Stage 1: Segment conversations into topical chunks."""
     from sbs.agents.segmentation import segment_conversations
 
-    segments = await segment_conversations(state.conversations, llm, state.config)
+    segments = await segment_conversations(state.conversations, llm, state.config, progress)
     state.segments = segments
     console.print(f"  Created [bold]{len(segments)}[/bold] segments")
 
 
-async def _stage_2_extract(state: PipelineState, llm: LLMClient) -> None:
+async def _stage_2_extract(
+    state: PipelineState, llm: LLMClient, progress: StageProgress | None
+) -> None:
     """Stage 2: Extract structured knowledge from segments."""
     from sbs.agents.extraction import extract_knowledge
 
-    extractions = await extract_knowledge(state.segments, llm, state.config)
+    extractions = await extract_knowledge(state.segments, llm, state.config, progress)
     state.extractions = extractions
     console.print(f"  Extracted knowledge from [bold]{len(extractions)}[/bold] segments")
 
 
-async def _stage_3_synthesize(state: PipelineState, llm: LLMClient) -> None:
+async def _stage_3_synthesize(
+    state: PipelineState, llm: LLMClient, progress: StageProgress | None
+) -> None:
     """Stage 3: Synthesize atomic notes from extracted knowledge."""
     from sbs.agents.synthesis import synthesize_notes
 
     draft_notes, source_notes, literature_notes = await synthesize_notes(
-        state.extractions, state.conversations, llm, state.config
+        state.extractions, state.conversations, llm, state.config, progress
     )
     state.draft_notes = draft_notes
     state.source_notes = source_notes
@@ -68,7 +86,9 @@ async def _stage_3_synthesize(state: PipelineState, llm: LLMClient) -> None:
     )
 
 
-async def _stage_4_link(state: PipelineState, llm: LLMClient) -> None:
+async def _stage_4_link(
+    state: PipelineState, llm: LLMClient, _progress: StageProgress | None
+) -> None:
     """Stage 4: Discover links and create MOCs."""
     from sbs.agents.linking import link_notes
 
@@ -82,7 +102,9 @@ async def _stage_4_link(state: PipelineState, llm: LLMClient) -> None:
     )
 
 
-async def _stage_5_validate(state: PipelineState, llm: LLMClient) -> None:
+async def _stage_5_validate(
+    state: PipelineState, llm: LLMClient, _progress: StageProgress | None
+) -> None:
     """Stage 5: Validate output quality."""
     from sbs.agents.validation import validate_vault
 
@@ -116,6 +138,67 @@ def _apply_prompt_bundle(config: Config) -> None:
     console.print(f"  Prompt bundle: [bold]{bundle.bundle_id}[/bold] ({source})")
 
 
+def _get_stage_total(stage_index: int, state: PipelineState) -> int | None:
+    """Return the expected item count for a stage, or None if indeterminate."""
+    if stage_index == 1:
+        return len(state.conversations) if state.conversations else None
+    if stage_index == 2:
+        return len(state.segments) if state.segments else None
+    if stage_index == 3:
+        return len(state.extractions) if state.extractions else None
+    return None
+
+
+async def _run_stages(
+    state: PipelineState,
+    llm: LLMClient,
+    checkpoint_mgr: CheckpointManager | None,
+) -> None:
+    """Run pipeline stages with rich progress display."""
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    ) as progress:
+        for i, (label, stage_fn) in enumerate(STAGES):
+            if i in state.completed_stages:
+                console.print(f"  [dim]Stage {i}: {label} (skipped -- already done)[/dim]")
+                continue
+
+            total = _get_stage_total(i, state)
+            task_id = progress.add_task(f"Stage {i}: {label}...", total=total)
+
+            # Create StageProgress wired to the Rich progress bar
+            stage_progress: StageProgress | None = None
+            if total is not None:
+                stage_progress = StageProgress(
+                    total=total,
+                    _on_advance=lambda n, _tid=task_id: progress.advance(_tid, n),
+                )
+
+            stage_start = perf_counter()
+            await stage_fn(state, llm, stage_progress)
+            stage_elapsed = perf_counter() - stage_start
+            state.completed_stages.append(i)
+            progress.remove_task(task_id)
+
+            # Format elapsed + throughput summary
+            parts = [f"Stage {i}: {label} OK"]
+            parts.append(f"({stage_elapsed:.1f}s")
+            if stage_progress is not None and stage_progress.completed > 0:
+                tput = stage_progress.completed / stage_elapsed if stage_elapsed > 0 else 0
+                parts[-1] += f", {tput:.1f} items/s"
+            parts[-1] += ")"
+            console.print(f"  [green]{' '.join(parts)}[/green]")
+
+            if checkpoint_mgr is not None:
+                checkpoint_mgr.save(state, i)
+
+
 async def run_pipeline(config: Config) -> PipelineState:
     """Run the full conversion pipeline."""
     console.print("[bold green]SBS Pipeline Started[/bold green]")
@@ -144,22 +227,7 @@ async def run_pipeline(config: Config) -> PipelineState:
     )
 
     llm = LLMClient(config, cost_summary=state.cost)
-
-    with Progress(
-        SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
-    ) as progress:
-        for i, (label, stage_fn) in enumerate(STAGES):
-            if i in state.completed_stages:
-                console.print(f"  [dim]Stage {i}: {label} (skipped -- already done)[/dim]")
-                continue
-
-            task = progress.add_task(f"Stage {i}: {label}...", total=None)
-            await stage_fn(state, llm)
-            state.completed_stages.append(i)
-            progress.remove_task(task)
-
-            console.print(f"  [green]Stage {i}: {label} OK[/green]")
-            checkpoint_mgr.save(state, i)
+    await _run_stages(state, llm, checkpoint_mgr)
 
     # Write output
     from sbs.output.writer import write_vault
@@ -196,22 +264,7 @@ async def resume_pipeline(
     _apply_prompt_bundle(state.config)
 
     llm = LLMClient(state.config, cost_summary=state.cost)
-
-    with Progress(
-        SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
-    ) as progress:
-        for i, (label, stage_fn) in enumerate(STAGES):
-            if i in state.completed_stages:
-                console.print(f"  [dim]Stage {i}: {label} (skipped)[/dim]")
-                continue
-
-            task = progress.add_task(f"Stage {i}: {label}...", total=None)
-            await stage_fn(state, llm)
-            state.completed_stages.append(i)
-            progress.remove_task(task)
-
-            console.print(f"  [green]Stage {i}: {label} OK[/green]")
-            checkpoint_mgr.save(state, i)
+    await _run_stages(state, llm, checkpoint_mgr)
 
     from sbs.output.writer import write_vault
 

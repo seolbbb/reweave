@@ -193,6 +193,174 @@ class TestSegmentationShortConversation:
         assert len(segments[0].messages) == 5
 
 
+class TestSegmentationFallback:
+    @pytest.mark.asyncio
+    async def test_long_conversation_falls_back_when_llm_fails(self):
+        from sbs.agents.segmentation import WINDOW_SIZE, segment_conversations
+        from sbs.config import Config
+
+        class FailingLLM:
+            async def cheap_structured_call(self, **_kwargs):
+                raise ValueError("Could not parse structured JSON from Google response")
+
+        conv = NormalizedConversation(
+            id="fallback-conv",
+            title="Long Chat",
+            source="chatgpt",
+            created_at="2026-01-01T00:00:00Z",
+            messages=[
+                NormalizedMessage(role="user", content=f"Message {i}")
+                for i in range(65)
+            ],
+            raw_message_count=65,
+        )
+        config = Config(concurrency=1)
+        segments = await segment_conversations([conv], FailingLLM(), config)  # type: ignore[arg-type]
+
+        assert len(segments) >= 3
+        assert segments[0].start_index == 0
+        assert segments[-1].end_index == len(conv.messages) - 1
+        assert all(len(seg.messages) <= WINDOW_SIZE for seg in segments)
+
+
+class TestSegmentationMicroBatch:
+    def _make_long_conv(
+        self, conv_id: str, msg_count: int, msg_len: int = 120
+    ) -> NormalizedConversation:
+        return NormalizedConversation(
+            id=conv_id,
+            title=f"Conversation {conv_id}",
+            source="chatgpt",
+            created_at="2026-01-01T00:00:00Z",
+            messages=[
+                NormalizedMessage(role="user", content=("x" * msg_len) + f" {i}")
+                for i in range(msg_count)
+            ],
+            raw_message_count=msg_count,
+        )
+
+    def test_pack_micro_batches_respects_constraints(self):
+        from sbs.agents.segmentation import _estimate_conversation_tokens, _pack_micro_batches
+
+        convs = [
+            self._make_long_conv("c1", 30, msg_len=500),
+            self._make_long_conv("c2", 30, msg_len=300),
+            self._make_long_conv("c3", 30, msg_len=200),
+            self._make_long_conv("c4", 30, msg_len=100),
+        ]
+        batches = _pack_micro_batches(convs, max_items=2, token_budget=3500)
+
+        seen_ids = [conv.id for batch in batches for conv in batch]
+        assert sorted(seen_ids) == sorted(conv.id for conv in convs)
+        for batch in batches:
+            assert len(batch) <= 2
+            token_sum = sum(_estimate_conversation_tokens(conv) for conv in batch)
+            assert token_sum <= 3500 or len(batch) == 1
+
+    def test_map_batch_result_requires_all_conversations(self):
+        from sbs.agents.segmentation import (
+            ConversationSegmentationResult,
+            SegmentationBatchResult,
+            SegmentBoundary,
+            _map_batch_result,
+        )
+
+        convs = [
+            self._make_long_conv("c1", 30),
+            self._make_long_conv("c2", 30),
+        ]
+        result = SegmentationBatchResult(
+            items=[
+                ConversationSegmentationResult(
+                    conversation_id="c1",
+                    segments=[
+                        SegmentBoundary(start_index=0, end_index=29, topic_label="Topic 1"),
+                    ],
+                )
+            ]
+        )
+
+        with pytest.raises(ValueError, match="missing conversations"):
+            _map_batch_result(convs, result)
+
+    @pytest.mark.asyncio
+    async def test_segment_conversations_micro_batch_split_retry(self):
+        from sbs.agents.segmentation import (
+            ConversationSegmentationResult,
+            SegmentationBatchResult,
+            SegmentBoundary,
+            segment_conversations,
+        )
+        from sbs.config import Config
+
+        class SplitRetryLLM:
+            def __init__(self):
+                self.calls = 0
+
+            async def cheap_structured_call(self, **kwargs):
+                self.calls += 1
+                user_prompt = kwargs["user"]
+                if "Conversation ID: c1" in user_prompt and "Conversation ID: c2" in user_prompt:
+                    raise ValueError("Segmentation batch response missing conversations: c2")
+                if "Conversation ID: c1" in user_prompt:
+                    return (
+                        SegmentationBatchResult(
+                            items=[
+                                ConversationSegmentationResult(
+                                    conversation_id="c1",
+                                    segments=[
+                                        SegmentBoundary(
+                                            start_index=0,
+                                            end_index=29,
+                                            topic_label="C1 topic",
+                                        )
+                                    ],
+                                )
+                            ]
+                        ),
+                        None,
+                    )
+                return (
+                    SegmentationBatchResult(
+                        items=[
+                            ConversationSegmentationResult(
+                                conversation_id="c2",
+                                segments=[
+                                    SegmentBoundary(
+                                        start_index=0,
+                                        end_index=29,
+                                        topic_label="C2 topic",
+                                    )
+                                ],
+                            )
+                        ]
+                    ),
+                    None,
+                )
+
+        llm = SplitRetryLLM()
+        convs = [
+            self._make_long_conv("c1", 30, msg_len=400),
+            self._make_long_conv("c2", 30, msg_len=380),
+        ]
+        config = Config(
+            concurrency=1,
+            stage1_batch_enabled=True,
+            stage1_batch_max_items=2,
+            stage1_batch_input_token_budget=12000,
+            stage1_batch_split_retries=3,
+        )
+
+        segments = await segment_conversations(convs, llm, config)  # type: ignore[arg-type]
+
+        assert llm.calls >= 3
+        assert len(segments) == 2
+        assert segments[0].conversation_id == "c1"
+        assert segments[0].topic_label == "C1 topic"
+        assert segments[1].conversation_id == "c2"
+        assert segments[1].topic_label == "C2 topic"
+
+
 def _make_note(
     note_id: str,
     title: str,

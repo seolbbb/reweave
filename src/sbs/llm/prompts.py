@@ -19,6 +19,30 @@ Conversation messages:
 
 Return the segments as structured data."""
 
+SEGMENTATION_BATCH_SYSTEM = """\
+You are a conversation analyst. For each conversation in the input, identify topic transitions \
+and segment it into coherent topical sections.
+
+For each conversation item:
+- conversation_id: the exact input conversation id
+- segments: list of:
+  - start_index: message index where the topic begins
+  - end_index: message index where the topic ends (inclusive)
+  - topic_label: concise topic label (2-6 words)
+
+Rules:
+- Segment each conversation independently.
+- Segment indices are local to each conversation.
+- Return exactly one item per input conversation_id.
+- Do not merge or split conversations across ids."""
+
+SEGMENTATION_BATCH_USER = """\
+Analyze the following conversation batch and return structured segmentation for each conversation.
+
+Input batch:
+{batch_payload}
+"""
+
 EXTRACTION_SYSTEM = """\
 You are a knowledge extraction specialist. Your task is to extract structured \
 knowledge from a conversation segment about "{topic_label}".
