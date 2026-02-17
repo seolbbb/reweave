@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 from typing import Any
 
@@ -67,11 +68,11 @@ class GoogleProvider:
         text = self._extract_text(response)
         return text, self._build_usage(response, model)
 
-    async def _call_with_retry(self, *, max_retries: int = 3, **kwargs: Any) -> Any:
-        """Call the API with exponential backoff retry."""
+    async def _call_with_retry(self, *, max_retries: int = 5, **kwargs: Any) -> Any:
+        """Call the API with exponential backoff + jitter retry."""
         from google.genai import errors
 
-        delays = [1, 4, 16]
+        delays = [1, 2, 4, 8, 16]
         last_error: Exception | None = None
 
         for attempt in range(max_retries):
@@ -93,7 +94,9 @@ class GoogleProvider:
                     status_code == 429 or status_code >= 500
                 )
                 if should_retry and attempt < max_retries - 1:
-                    await asyncio.sleep(delays[attempt])
+                    delay = delays[min(attempt, len(delays) - 1)]
+                    jitter = random.uniform(0, delay)  # noqa: S311
+                    await asyncio.sleep(delay + jitter)
                     continue
                 raise
 

@@ -12,6 +12,7 @@ from sbs.llm.client import LLMClient
 from sbs.llm.prompts import SEGMENTATION_SYSTEM, SEGMENTATION_USER, get_prompt
 from sbs.models.conversation import NormalizedConversation, NormalizedMessage
 from sbs.models.segment import Segment
+from sbs.pipeline.progress import StageProgress
 
 # Threshold: conversations with fewer messages get a single segment.
 SHORT_CONVERSATION_THRESHOLD = 20
@@ -40,6 +41,7 @@ async def segment_conversations(
     conversations: list[NormalizedConversation],
     llm: LLMClient,
     config: Config,
+    progress: StageProgress | None = None,
 ) -> list[Segment]:
     """Segment all conversations into topical segments."""
     all_segments: list[Segment] = []
@@ -48,12 +50,16 @@ async def segment_conversations(
     async def process_one(conv: NormalizedConversation) -> list[Segment]:
         async with semaphore:
             try:
-                return await _segment_single(conv, llm, config)
+                result = await _segment_single(conv, llm, config)
             except Exception as exc:
                 if _is_recoverable_segmentation_error(exc):
                     # Keep pipeline progress if model output is malformed.
-                    return _fallback_window_segments(conv)
-                raise
+                    result = _fallback_window_segments(conv)
+                else:
+                    raise
+            if progress is not None:
+                progress.advance(1)
+            return result
 
     tasks = [process_one(conv) for conv in conversations]
     results = await asyncio.gather(*tasks)
