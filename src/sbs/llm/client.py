@@ -33,7 +33,7 @@ class LLMClient:
         elif self._config.provider == "google":
             from sbs.llm.providers.google import GoogleProvider
 
-            return GoogleProvider(api_key=self._config.google_api_key)
+            return GoogleProvider(api_key=self._config.google_api_key, config=self._config)
         else:
             raise ValueError(f"Unknown provider: {self._config.provider}")
 

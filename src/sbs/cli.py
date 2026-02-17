@@ -113,6 +113,32 @@ def convert(
         int,
         typer.Option(help="Input token budget per Stage 3 micro-batch."),
     ] = 24000,
+    google_rpm_limit: Annotated[
+        int,
+        typer.Option("--google-rpm-limit", help="Google API per-model requests per minute."),
+    ] = 1000,
+    google_tpm_limit: Annotated[
+        int,
+        typer.Option("--google-tpm-limit", help="Google API per-model tokens per minute."),
+    ] = 1_000_000,
+    google_rpd_limit: Annotated[
+        int,
+        typer.Option("--google-rpd-limit", help="Google API per-model requests per day."),
+    ] = 10_000,
+    google_quota_headroom: Annotated[
+        float,
+        typer.Option(
+            "--google-quota-headroom",
+            help="Safety ratio applied to Google RPM/TPM/RPD limits (0-1].",
+        ),
+    ] = 0.8,
+    google_enforce_quota: Annotated[
+        bool,
+        typer.Option(
+            "--google-enforce-quota/--no-google-enforce-quota",
+            help="Enable Google provider quota-aware throttling.",
+        ),
+    ] = True,
     checkpoint_dir: Annotated[
         Path, typer.Option(help="Checkpoint directory.")
     ] = Path("./.sbs-checkpoints"),
@@ -145,6 +171,11 @@ def convert(
         stage3_batch_enabled=stage3_batch_enabled,
         stage3_batch_max_items=stage3_batch_max_items,
         stage3_batch_input_token_budget=stage3_batch_token_budget,
+        google_rpm_limit=google_rpm_limit,
+        google_tpm_limit=google_tpm_limit,
+        google_rpd_limit=google_rpd_limit,
+        google_quota_headroom=google_quota_headroom,
+        google_enforce_quota=google_enforce_quota,
         checkpoint_dir=checkpoint_dir,
         prompt_bundle=prompt_bundle,
         dry_run=dry_run,

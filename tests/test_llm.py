@@ -100,7 +100,7 @@ class TestConfigDefaults:
         monkeypatch.delenv("SBS_CHEAP_MODEL", raising=False)
 
         config = Config(provider="google")
-        assert config.model == "gemini-3-pro-preview"
+        assert config.model == "gemini-3-flash-preview"
         assert config.cheap_model == "gemini-3-flash-preview"
 
     def test_model_env_overrides_provider_defaults(self, monkeypatch):
@@ -135,3 +135,17 @@ class TestConfigDefaults:
 
         assert Config(provider="openai", concurrency=3).concurrency == 3
         assert Config(provider="anthropic", concurrency=7).concurrency == 7
+
+    def test_google_quota_headroom_effective_limits(self):
+        from sbs.config import Config
+
+        config = Config(
+            provider="google",
+            google_rpm_limit=1000,
+            google_tpm_limit=1_000_000,
+            google_rpd_limit=10_000,
+            google_quota_headroom=0.8,
+        )
+        assert config.effective_google_rpm_limit() == 800
+        assert config.effective_google_tpm_limit() == 800_000
+        assert config.effective_google_rpd_limit() == 8000

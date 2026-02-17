@@ -14,7 +14,7 @@ load_dotenv()
 PROVIDER_DEFAULT_MODELS: dict[str, tuple[str, str]] = {
     "anthropic": ("claude-sonnet-4-5-20250929", "claude-haiku-4-5-20251001"),
     "openai": ("gpt-4o", "gpt-4o-mini"),
-    "google": ("gemini-3-pro-preview", "gemini-3-flash-preview"),
+    "google": ("gemini-3-flash-preview", "gemini-3-flash-preview"),
 }
 
 GOOGLE_MODEL_ALIASES: dict[str, str] = {
@@ -30,6 +30,33 @@ _PROVIDER_CONCURRENCY_DEFAULTS: dict[str, int] = {
 
 # Sentinel indicating the user did NOT explicitly set --concurrency.
 _DEFAULT_CONCURRENCY = 3
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 class Config(BaseModel):
@@ -86,6 +113,28 @@ class Config(BaseModel):
         default_factory=lambda: os.getenv("GOOGLE_API_KEY", "")
     )
 
+    # Google quota safety controls
+    google_rpm_limit: int = Field(
+        default_factory=lambda: _env_int("SBS_GOOGLE_RPM_LIMIT", 1000),
+        ge=1,
+    )
+    google_tpm_limit: int = Field(
+        default_factory=lambda: _env_int("SBS_GOOGLE_TPM_LIMIT", 1_000_000),
+        ge=1,
+    )
+    google_rpd_limit: int = Field(
+        default_factory=lambda: _env_int("SBS_GOOGLE_RPD_LIMIT", 10_000),
+        ge=1,
+    )
+    google_quota_headroom: float = Field(
+        default_factory=lambda: _env_float("SBS_GOOGLE_QUOTA_HEADROOM", 0.8),
+        gt=0.0,
+        le=1.0,
+    )
+    google_enforce_quota: bool = Field(
+        default_factory=lambda: _env_bool("SBS_GOOGLE_ENFORCE_QUOTA", True)
+    )
+
     # Flags
     dry_run: bool = False
     verbose: bool = False
@@ -111,6 +160,18 @@ class Config(BaseModel):
             )
 
         return self
+
+    def effective_google_rpm_limit(self) -> int:
+        """Return Google RPM limit after applying safety headroom."""
+        return max(1, int(self.google_rpm_limit * self.google_quota_headroom))
+
+    def effective_google_tpm_limit(self) -> int:
+        """Return Google TPM limit after applying safety headroom."""
+        return max(1, int(self.google_tpm_limit * self.google_quota_headroom))
+
+    def effective_google_rpd_limit(self) -> int:
+        """Return Google RPD limit after applying safety headroom."""
+        return max(1, int(self.google_rpd_limit * self.google_quota_headroom))
 
     def resolve_stage2_concurrency(self) -> int:
         """Resolve effective concurrency for Stage 2."""
