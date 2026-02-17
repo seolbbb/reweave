@@ -21,6 +21,7 @@ from sbs.llm.prompts import (
 )
 from sbs.models.conversation import NormalizedConversation, NormalizedMessage
 from sbs.models.segment import Segment
+from sbs.pipeline.progress import StageProgress
 
 console = Console()
 
@@ -70,6 +71,7 @@ async def segment_conversations(
     conversations: list[NormalizedConversation],
     llm: LLMClient,
     config: Config,
+    progress: StageProgress | None = None,
 ) -> list[Segment]:
     """Segment all conversations into topical segments."""
     long_conversations: list[NormalizedConversation] = []
@@ -78,6 +80,8 @@ async def segment_conversations(
     for conv in conversations:
         if len(conv.messages) < SHORT_CONVERSATION_THRESHOLD:
             by_conversation[conv.id] = [_single_segment(conv)]
+            if progress is not None:
+                progress.advance(1)
         else:
             long_conversations.append(conv)
 
@@ -85,11 +89,11 @@ async def segment_conversations(
         return _flatten_segments_in_order(conversations, by_conversation)
 
     if not config.stage1_batch_enabled:
-        llm_segments = await _segment_individually(long_conversations, llm, config)
+        llm_segments = await _segment_individually(long_conversations, llm, config, progress)
         by_conversation.update(llm_segments)
         return _flatten_segments_in_order(conversations, by_conversation)
 
-    llm_segments = await _segment_in_micro_batches(long_conversations, llm, config)
+    llm_segments = await _segment_in_micro_batches(long_conversations, llm, config, progress)
     by_conversation.update(llm_segments)
     return _flatten_segments_in_order(conversations, by_conversation)
 
@@ -126,6 +130,7 @@ async def _segment_individually(
     conversations: list[NormalizedConversation],
     llm: LLMClient,
     config: Config,
+    progress: StageProgress | None = None,
 ) -> dict[str, list[Segment]]:
     """Segment conversations with one LLM call per conversation."""
     semaphore = asyncio.Semaphore(config.concurrency)
@@ -133,6 +138,8 @@ async def _segment_individually(
     async def process_one(conv: NormalizedConversation) -> tuple[str, list[Segment]]:
         async with semaphore:
             segments, _used_fallback = await _segment_single_with_recovery(conv, llm, config)
+            if progress is not None:
+                progress.advance(1)
             return conv.id, segments
 
     tasks = [process_one(conv) for conv in conversations]
@@ -144,6 +151,7 @@ async def _segment_in_micro_batches(
     conversations: list[NormalizedConversation],
     llm: LLMClient,
     config: Config,
+    progress: StageProgress | None = None,
 ) -> dict[str, list[Segment]]:
     """Segment conversations using token-budget micro-batching."""
     batches = _pack_micro_batches(
@@ -182,6 +190,8 @@ async def _segment_in_micro_batches(
             split_retry_count += split_retries
             fallback_count += batch_fallbacks
             total_batch_latency += elapsed
+            if progress is not None:
+                progress.advance(len(batch))
 
             if config.verbose:
                 avg_latency = total_batch_latency / completed_batches
