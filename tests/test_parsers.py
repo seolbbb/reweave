@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from sbs.parsers.chatgpt import ChatGPTParser
-from sbs.parsers.claude import ClaudeParser
-from sbs.parsers.detector import detect_and_parse, parse_directory
+from reweave.parsers.chatgpt import ChatGPTParser
+from reweave.parsers.claude import ClaudeParser
+from reweave.parsers.detector import detect_and_parse, parse_directory
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

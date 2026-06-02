@@ -1,4 +1,4 @@
-# AGENTS.md
+﻿# AGENTS.md
 
 ## CRITICAL: PULL REQUEST TARGET BRANCH (NEVER DELETE THIS SECTION)
 
@@ -55,7 +55,7 @@ feature branches (your work)
 
 ## Project Overview
 
-- **Repository:** `seolbbb/second-brain-starter`
+- **Repository:** `seolbbb/reweave`
 - **Language:** Python
 - **License:** MIT
 
@@ -63,10 +63,13 @@ feature branches (your work)
 
 ## Structure
 
-This is a starter/template project. The codebase is currently in its initial state.
+Reweave is a local archive/search app for AI conversation exports.
 
 ```
-second-brain-starter/
+reweave/
+├── frontend/           # React/Vite local web app
+├── src/reweave/        # Python CLI, archive, API, and insight code
+├── tests/              # Python tests
 ├── .gitignore          # Python-specific gitignore
 ├── LICENSE             # MIT License
 ├── README.md           # Project readme
