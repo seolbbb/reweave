@@ -1,137 +1,82 @@
-"""Tests for LLM client and cost tracking (no actual API calls)."""
+"""Tests for LLM provider configuration."""
 
-from sbs.llm.cost import estimate_call_cost, track_usage
-from sbs.models.pipeline import CostSummary
+import pytest
 
-
-class TestCostTracking:
-    def test_estimate_sonnet_cost(self):
-        cost = estimate_call_cost("claude-sonnet-4-5-20250929", 1000, 500)
-        expected = (1000 / 1_000_000) * 3.0 + (500 / 1_000_000) * 15.0
-        assert abs(cost - expected) < 1e-10
-
-    def test_estimate_haiku_cost(self):
-        cost = estimate_call_cost("claude-haiku-4-5-20251001", 1000, 500)
-        expected = (1000 / 1_000_000) * 0.80 + (500 / 1_000_000) * 4.0
-        assert abs(cost - expected) < 1e-10
-
-    def test_estimate_gpt4o_cost(self):
-        cost = estimate_call_cost("gpt-4o", 1000, 500)
-        expected = (1000 / 1_000_000) * 2.50 + (500 / 1_000_000) * 10.0
-        assert abs(cost - expected) < 1e-10
-
-    def test_estimate_gemini_pro_cost(self):
-        cost = estimate_call_cost("gemini-3-pro-preview", 1000, 500)
-        expected = (1000 / 1_000_000) * 3.5 + (500 / 1_000_000) * 10.5
-        assert abs(cost - expected) < 1e-10
-
-    def test_estimate_gemini_flash_cost(self):
-        cost = estimate_call_cost("gemini-3-flash-preview", 1000, 500)
-        expected = (1000 / 1_000_000) * 0.30 + (500 / 1_000_000) * 2.5
-        assert abs(cost - expected) < 1e-10
-
-    def test_unknown_model_defaults(self):
-        cost = estimate_call_cost("unknown-model", 1000, 500)
-        # Should default to Sonnet pricing
-        expected = (1000 / 1_000_000) * 3.0 + (500 / 1_000_000) * 15.0
-        assert abs(cost - expected) < 1e-10
-
-    def test_track_usage(self):
-        summary = CostSummary()
-        track_usage(summary, "claude-sonnet-4-5-20250929", 1000, 500)
-        assert summary.total_input_tokens == 1000
-        assert summary.total_output_tokens == 500
-        assert len(summary.calls) == 1
-        assert summary.estimated_cost_usd > 0
-
-    def test_track_multiple_calls(self):
-        summary = CostSummary()
-        track_usage(summary, "claude-haiku-4-5-20251001", 500, 200)
-        track_usage(summary, "claude-sonnet-4-5-20250929", 2000, 1000)
-        assert summary.total_input_tokens == 2500
-        assert summary.total_output_tokens == 1200
-        assert len(summary.calls) == 2
+import reweave.llm
+from reweave.llm import (
+    LLMSettings,
+    ProviderConfigurationError,
+    ProviderRequestError,
+    create_failover_provider,
+    create_provider,
+)
 
 
-class TestLLMClientInit:
-    def test_create_anthropic_client(self):
-        from sbs.config import Config
-
-        config = Config(provider="anthropic", anthropic_api_key="test-key")
-        from sbs.llm.client import LLMClient
-
-        client = LLMClient(config)
-        assert client._config.provider == "anthropic"
-
-    def test_create_openai_client(self):
-        from sbs.config import Config
-
-        config = Config(provider="openai", openai_api_key="test-key")
-        from sbs.llm.client import LLMClient
-
-        client = LLMClient(config)
-        assert client._config.provider == "openai"
-
-    def test_create_google_client(self):
-        from sbs.config import Config
-
-        config = Config(provider="google", google_api_key="test-key")
-        from sbs.llm.client import LLMClient
-
-        client = LLMClient(config)
-        assert client._config.provider == "google"
-
-    def test_shared_cost_summary(self):
-        from sbs.config import Config
-
-        config = Config(provider="anthropic", anthropic_api_key="test-key")
-        cost = CostSummary()
-        from sbs.llm.client import LLMClient
-
-        client = LLMClient(config, cost_summary=cost)
-        assert client.cost is cost
+class Credential:
+    def __init__(self, label, api_key):
+        self.key_id = label
+        self.label = label
+        self.api_key = api_key
 
 
-class TestConfigDefaults:
-    def test_google_provider_defaults(self, monkeypatch):
-        from sbs.config import Config
+def test_openai_requires_api_key():
+    with pytest.raises(ProviderConfigurationError):
+        create_provider(LLMSettings(provider="openai", model="gpt-4o-mini", api_key=""))
 
-        monkeypatch.delenv("SBS_MODEL", raising=False)
-        monkeypatch.delenv("SBS_CHEAP_MODEL", raising=False)
 
-        config = Config(provider="google")
-        assert config.model == "gemini-3-pro-preview"
-        assert config.cheap_model == "gemini-3-flash-preview"
+def test_compatible_requires_base_url():
+    with pytest.raises(ProviderConfigurationError):
+        create_provider(
+            LLMSettings(provider="openai-compatible", model="model", api_key="key")
+        )
 
-    def test_model_env_overrides_provider_defaults(self, monkeypatch):
-        from sbs.config import Config
 
-        monkeypatch.setenv("SBS_MODEL", "my-main")
-        monkeypatch.setenv("SBS_CHEAP_MODEL", "my-cheap")
+def test_unsupported_provider():
+    with pytest.raises(ProviderConfigurationError):
+        create_provider(LLMSettings(provider="unknown", model="model", api_key="key"))
 
-        config = Config(provider="google")
-        assert config.model == "my-main"
-        assert config.cheap_model == "my-cheap"
 
-    def test_google_legacy_model_aliases(self, monkeypatch):
-        from sbs.config import Config
+def test_failover_provider_uses_next_key_for_retryable_error(monkeypatch):
+    calls = []
 
-        monkeypatch.setenv("SBS_MODEL", "gemini-3-pro")
-        monkeypatch.setenv("SBS_CHEAP_MODEL", "gemini-3-flash")
+    def fake_post(url, *, headers, json, timeout):
+        calls.append(headers["Authorization"])
+        request = reweave.llm.httpx.Request("POST", url)
+        if len(calls) == 1:
+            return reweave.llm.httpx.Response(401, request=request)
+        return reweave.llm.httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "ok"}}]},
+            request=request,
+        )
 
-        config = Config(provider="google")
-        assert config.model == "gemini-3-pro-preview"
-        assert config.cheap_model == "gemini-3-flash-preview"
+    monkeypatch.setattr(reweave.llm.httpx, "post", fake_post)
+    provider = create_failover_provider(
+        LLMSettings(provider="openai", model="gpt-4o-mini", api_key=""),
+        (Credential("first", "first-key"), Credential("second", "second-key")),
+    )
 
-    def test_provider_default_concurrency_when_omitted(self):
-        from sbs.config import Config
+    text = provider.generate_text(system="s", user="u", model="gpt-4o-mini")
 
-        assert Config(provider="anthropic").concurrency == 10
-        assert Config(provider="openai").concurrency == 15
-        assert Config(provider="google").concurrency == 15
+    assert text == "ok"
+    assert calls == ["Bearer first-key", "Bearer second-key"]
 
-    def test_explicit_concurrency_is_preserved(self):
-        from sbs.config import Config
 
-        assert Config(provider="openai", concurrency=3).concurrency == 3
-        assert Config(provider="anthropic", concurrency=7).concurrency == 7
+def test_failover_provider_does_not_retry_non_retryable_error(monkeypatch):
+    calls = []
+
+    def fake_post(url, *, headers, json, timeout):
+        calls.append(headers["Authorization"])
+        request = reweave.llm.httpx.Request("POST", url)
+        return reweave.llm.httpx.Response(400, request=request)
+
+    monkeypatch.setattr(reweave.llm.httpx, "post", fake_post)
+    provider = create_failover_provider(
+        LLMSettings(provider="openai", model="gpt-4o-mini", api_key=""),
+        (Credential("first", "first-key"), Credential("second", "second-key")),
+    )
+
+    with pytest.raises(ProviderRequestError):
+        provider.generate_text(system="s", user="u", model="gpt-4o-mini")
+
+    assert calls == ["Bearer first-key"]
