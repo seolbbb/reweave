@@ -23,6 +23,18 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgba(36, 92, 143, 0.28);
+  outline-offset: 2px;
+}
+
 .appShell {
   display: grid;
   grid-template-columns: 300px minmax(420px, 1fr) 380px;
@@ -56,6 +68,7 @@ button {
 
 h1,
 h2,
+h3,
 p {
   margin: 0;
 }
@@ -70,6 +83,15 @@ h2 {
   align-items: center;
   font-size: 15px;
   margin-bottom: 12px;
+}
+
+h3 {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  color: #38404a;
+  font-size: 13px;
+  margin-bottom: 10px;
 }
 
 .brandBlock p,
@@ -136,6 +158,11 @@ select {
   width: 100%;
 }
 
+.compactButton {
+  min-height: 32px;
+  margin-bottom: 12px;
+}
+
 .primaryButton {
   background: #245c8f;
   color: #ffffff;
@@ -152,6 +179,12 @@ select {
   margin-top: 20px;
   padding-top: 18px;
   border-top: 1px solid #e2e6eb;
+}
+
+.advancedFilters {
+  display: grid;
+  gap: 0;
+  margin-bottom: 14px;
 }
 
 .importPanel {
@@ -202,6 +235,242 @@ select {
   font-size: 12px;
   line-height: 1.4;
   text-align: left;
+}
+
+.pathImport {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.pathHint {
+  color: #66717f;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.settingsBlock {
+  display: grid;
+  gap: 14px;
+}
+
+.settingsBlock label {
+  margin-bottom: 0;
+}
+
+.settingsTitle {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.settingsTitle h2 {
+  margin-bottom: 4px;
+}
+
+.settingsTitle p,
+.advancedSettingsBody p {
+  color: #66717f;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.connectedBadge {
+  border: 1px solid #a9cdb8;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #edf8f1;
+  color: #245e3d;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.connectForm,
+.connectedKey {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #d9dee5;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.keyHelp {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #66717f;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.keyHelp a {
+  color: #245c8f;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.connectActions,
+.connectionActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.connectActions .primaryButton,
+.connectActions .secondaryButton,
+.connectionActions .secondaryButton {
+  width: auto;
+  flex: 1 1 auto;
+}
+
+.connectedKey > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.connectedKey span,
+.connectedKey small {
+  color: #66717f;
+  font-size: 11px;
+}
+
+.connectedKey strong {
+  letter-spacing: 0.08em;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.quietDangerButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid #dfb5b5;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #fff7f7;
+  color: #8a3131;
+}
+
+.modelSetup {
+  display: grid;
+  gap: 10px;
+}
+
+.sectionHeading {
+  display: grid;
+  grid-template-columns: 1fr 32px;
+  gap: 8px;
+  align-items: start;
+}
+
+.sectionHeading h3 {
+  margin-bottom: 3px;
+}
+
+.sectionHeading p,
+.selectionEmpty {
+  color: #66717f;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  border: 1px solid #cbd3dc;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #38404a;
+}
+
+.modelStatus {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 7px;
+  align-items: start;
+  border: 1px solid #d9dee5;
+  border-radius: 6px;
+  padding: 8px;
+  background: #f8fafc;
+  color: #56616d;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.modelStatus.success {
+  border-color: #a9cdb8;
+  background: #edf8f1;
+  color: #245e3d;
+}
+
+.modelStatus.invalid-key,
+.modelStatus.permission,
+.modelStatus.rate-limit,
+.modelStatus.network,
+.modelStatus.error {
+  border-color: #dfb5b5;
+  background: #fff2f2;
+  color: #8a3131;
+}
+
+.modelStatus.empty {
+  border-color: #dec897;
+  background: #fff9e8;
+  color: #765812;
+}
+
+.fieldError {
+  color: #9b3030;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.secretInput {
+  display: grid;
+  grid-template-columns: 1fr 36px;
+}
+
+.secretInput input {
+  border-radius: 6px 0 0 6px;
+}
+
+.secretInput button {
+  border: 1px solid #cbd3dc;
+  border-left: 0;
+  border-radius: 0 6px 6px 0;
+  background: #ffffff;
+  color: #38404a;
+}
+
+.advancedSettings {
+  border-top: 1px solid #e2e6eb;
+  padding-top: 12px;
+}
+
+.advancedSettings summary {
+  color: #56616d;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.advancedSettings summary:focus-visible {
+  outline: 3px solid rgba(36, 92, 143, 0.28);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.advancedSettingsBody {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .resultsPane {
@@ -287,6 +556,11 @@ select {
   gap: 10px;
 }
 
+.selectionActions {
+  display: grid;
+  gap: 8px;
+}
+
 .selectedList {
   display: grid;
   gap: 8px;
@@ -308,6 +582,12 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.selectionEmpty {
+  border: 1px dashed #cbd3dc;
+  border-radius: 6px;
+  padding: 12px;
 }
 
 .selectedItem button,
@@ -392,5 +672,22 @@ select {
   .filterPane,
   .selectionPane {
     border-width: 0 0 1px;
+  }
+
+  .keyHelp,
+  .settingsTitle {
+    align-items: start;
+  }
+
+  .connectActions,
+  .connectionActions {
+    display: grid;
+  }
+
+  .connectActions .primaryButton,
+  .connectActions .secondaryButton,
+  .connectionActions .secondaryButton,
+  .quietDangerButton {
+    width: 100%;
   }
 }
