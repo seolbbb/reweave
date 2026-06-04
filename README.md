@@ -38,8 +38,8 @@ existing conversations and messages are ignored instead of duplicated.
 - Run a local React/FastAPI browser app for drag-and-drop import, search,
   selection, preview, and insight generation.
 - Run the same app in a native desktop window with `pywebview`.
-- Generate source-grounded Markdown insight reports with OpenAI, Anthropic,
-  Gemini, or OpenAI-compatible providers.
+- Generate source-grounded insight reports with immediate progress, localized
+  output, rendered Markdown, and supporting-conversation links.
 
 ## Install
 
@@ -119,7 +119,8 @@ The web app supports:
 - Multi-select conversations for insight generation.
 - LLM settings for provider, model, API key, base URL, context size, and
   temperature.
-- Copying generated insight Markdown.
+- Reading generated insights in a structured report workspace.
+- Copying or downloading generated insight Markdown.
 
 If the frontend build is missing, `reweave app` still starts the API and prints
 a warning.
@@ -138,6 +139,8 @@ public hosted service, but it is useful for local automation and testing.
 | `POST` | `/api/import/path` | Import from a directory, JSON file, or zip path. |
 | `POST` | `/api/import/upload` | Upload one or more `.json` or `.zip` files. |
 | `POST` | `/api/insights` | Generate and save an insight report. |
+| `POST` | `/api/insights/jobs` | Start an asynchronous insight report with immediate progress. |
+| `GET` | `/api/insights/jobs/{job_id}` | Read insight progress and the completed report. |
 | `GET` | `/api/insights` | List saved insight reports. |
 | `GET` | `/api/insights/{report_id}` | Load one saved insight report. |
 
@@ -193,19 +196,22 @@ platform-specific Reweave application data directory unless `--db` or
 
 ## Insight Generation
 
-Insight reports are generated from conversations you select. The prompt asks the
-model to produce Markdown with these sections:
+Insight reports are generated from conversations you select. Reweave detects the
+dominant Korean or English source language, explicitly requires that language in
+the model prompt, and produces rendered Markdown with these sections:
 
 - `Overview`
-- `Concept Map`
-- `Connections`
-- `New Insights`
-- `Uncertainties`
-- `Source Index`
+- `Key concepts`
+- `Connections between conversations`
+- `Agreements, contradictions, and patterns`
+- `New or surprising insights`
+- `Suggested follow-up questions`
+- `Source references`
 
 Important claims should include source references such as
-`[conversation_id#mIndex]`. Newly inferred connections are marked as
-`Inference:`.
+`[conversation_id#mIndex]`. The report UI turns these references into links to
+supporting messages. Multi-chunk source analysis runs concurrently before the
+final synthesis step.
 
 Supported providers:
 
