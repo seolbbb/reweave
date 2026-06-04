@@ -2,12 +2,16 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AlertCircle,
+  ArrowLeft,
+  BookOpen,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Download,
+  Clipboard,
+  Clock3,
   Eye,
   EyeOff,
+  FileDown,
   FileSearch,
   FileUp,
   FolderInput,
@@ -18,9 +22,11 @@ import {
   Save,
   Search,
   Settings,
+  Sparkles,
   Trash2,
   X
 } from "lucide-react";
+import { MarkdownContent, type CitationTarget } from "./MarkdownContent";
 import "./styles.css";
 
 type Excerpt = {
@@ -65,6 +71,23 @@ type Insight = {
   model: string;
   markdown: string;
   created_at: string;
+  language?: "ko" | "en";
+  performance?: {
+    total_ms?: number;
+    chunk_count?: number;
+    model_call_count?: number;
+    context_chars?: number;
+  };
+};
+
+type InsightJob = {
+  id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  stage: string;
+  message: string;
+  progress: number;
+  result: Insight | null;
+  error: string | null;
 };
 
 type ImportSummary = {
@@ -205,7 +228,9 @@ function App() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selectedById, setSelectedById] = useState<Record<string, SearchResult>>({});
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
+  const [detailMessageIndex, setDetailMessageIndex] = useState<number | null>(null);
   const [insight, setInsight] = useState<Insight | null>(null);
+  const [insightJob, setInsightJob] = useState<InsightJob | null>(null);
   const [settings, setSettings] = useState<SettingsState>(defaultSettings);
   const [paths, setPaths] = useState<AppPaths | null>(null);
   const [sourceFacets, setSourceFacets] = useState<SourceFacet[]>([]);
@@ -225,6 +250,15 @@ function App() {
 
   const selectedIds = useMemo(() => Object.keys(selectedById), [selectedById]);
   const selectedResults = useMemo(() => Object.values(selectedById), [selectedById]);
+  const insightBusy = insightJob?.status === "queued" || insightJob?.status === "running";
+  const reportOpen = Boolean(insight || insightBusy);
+  const visibleDetailMessages = useMemo(() => {
+    if (!detail) return [];
+    if (detailMessageIndex === null) return detail.messages.slice(0, 24);
+    return detail.messages.filter(
+      (message) => Math.abs(message.index - detailMessageIndex) <= 2
+    );
+  }, [detail, detailMessageIndex]);
   const activeProfile = useMemo(
     () => profiles.find((profile) => profile.id === settings.profileId) ?? profiles[0],
     [profiles, settings.profileId]
@@ -447,15 +481,20 @@ function App() {
     importFiles(event.dataTransfer.files);
   }
 
-  async function openDetail(id: string) {
+  async function openDetail(id: string, messageIndex: number | null = null) {
     setBusy(true);
+    setDetailMessageIndex(messageIndex);
     try {
       const response = await fetch(`/api/conversations/${id}`);
-      const data = await response.json();
+      const data = await parseJsonResponse<ConversationDetail>(response);
       setDetail(data);
     } finally {
       setBusy(false);
     }
+  }
+
+  function openCitation(target: CitationTarget) {
+    void openDetail(target.conversationId, target.messageIndex);
   }
 
   async function createInsight() {
@@ -479,10 +518,20 @@ function App() {
       setStatus("Choose a model that is currently available from the provider.");
       return;
     }
-    setBusy(true);
-    setStatus("Generating insight report...");
+    const initialJob: InsightJob = {
+      id: "",
+      status: "queued",
+      stage: "loading",
+      message: "Preparing selected conversations",
+      progress: 2,
+      result: null,
+      error: null
+    };
+    setInsight(null);
+    setInsightJob(initialJob);
+    setStatus("Preparing selected conversations...");
     try {
-      const response = await fetch("/api/insights", {
+      const response = await fetch("/api/insights/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -496,14 +545,43 @@ function App() {
           }
         })
       });
-      const data = await parseJsonResponse<Insight>(response);
-      setInsight(data);
-      setStatus("Insight report generated.");
+      const job = await parseJsonResponse<InsightJob>(response);
+      setInsightJob(job);
+      await pollInsightJob(job.id);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Insight generation failed.");
-    } finally {
-      setBusy(false);
+      const message = error instanceof Error ? error.message : "Insight generation failed.";
+      setInsightJob({ ...initialJob, status: "failed", stage: "failed", message, error: message });
+      setStatus(message);
     }
+  }
+
+  async function pollInsightJob(jobId: string) {
+    while (true) {
+      await delay(500);
+      const response = await fetch(`/api/insights/jobs/${jobId}`);
+      const job = await parseJsonResponse<InsightJob>(response);
+      setInsightJob(job);
+      setStatus(job.message);
+      if (job.status === "completed" && job.result) {
+        setInsight(job.result);
+        setStatus("Insight report ready.");
+        return;
+      }
+      if (job.status === "failed") {
+        throw new Error(job.error || "Insight generation failed.");
+      }
+    }
+  }
+
+  function downloadInsight() {
+    if (!insight) return;
+    const blob = new Blob([insight.markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${safeFilename(insight.title)}.md`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   function toggleSelection(result: SearchResult) {
@@ -1027,33 +1105,130 @@ function App() {
       <section className="resultsPane">
         <header className="toolbar">
           <span>{status}</span>
-          <span>{results.length} results</span>
+          {reportOpen && !insightBusy ? (
+            <button className="toolbarButton" type="button" onClick={() => setInsight(null)}>
+              <ArrowLeft size={15} />
+              Back to results
+            </button>
+          ) : reportOpen ? (
+            <span>{selectedIds.length} sources</span>
+          ) : (
+            <span>{results.length} results</span>
+          )}
         </header>
-        <div className="resultList">
-          {results.map((result) => (
-            <article key={result.id} className="resultRow">
-              <label className="checkCell">
-                <input
-                  type="checkbox"
-                  checked={Boolean(selectedById[result.id])}
-                  onChange={() => toggleSelection(result)}
-                />
-              </label>
-              <button className="resultContent" onClick={() => openDetail(result.id)}>
-                <div className="resultMeta">
-                  <strong>{result.title}</strong>
-                  <span>{result.source} - {result.raw_message_count} messages</span>
+        {reportOpen ? (
+          <div className="reportWorkspace">
+            {insightBusy && insightJob && (
+              <section className="generationCard" aria-live="polite">
+                <div className="generationIcon">
+                  <Sparkles size={24} />
                 </div>
-                {result.excerpts.map((excerpt) => (
-                  <p key={excerpt.message_id}>
-                    <span>[#{excerpt.message_index}] {excerpt.role}</span> {excerpt.excerpt}
+                <div className="generationCopy">
+                  <span className="eyebrow">Generating insight</span>
+                  <h2>{insightJob.message}</h2>
+                  <p>
+                    Reweave is analyzing {selectedIds.length} selected conversation
+                    {selectedIds.length === 1 ? "" : "s"} and linking findings to their sources.
                   </p>
-                ))}
-              </button>
-            </article>
-          ))}
-          {!results.length && <div className="emptyState">No search results yet.</div>}
-        </div>
+                  <div
+                    className="progressTrack"
+                    role="progressbar"
+                    aria-valuenow={insightJob.progress}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  >
+                    <span style={{ width: `${insightJob.progress}%` }} />
+                  </div>
+                  <div className="progressMeta">
+                    <span>{insightJob.stage}</span>
+                    <strong>{insightJob.progress}%</strong>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {insight && (
+              <>
+                <header className="reportHero">
+                  <div>
+                    <span className="eyebrow">
+                      {insight.language === "ko" ? "한국어 인사이트 보고서" : "Insight report"}
+                    </span>
+                    <h1>{insight.title}</h1>
+                    <p>
+                      A source-grounded synthesis of {insight.selected_conversation_ids.length}{" "}
+                      selected conversation
+                      {insight.selected_conversation_ids.length === 1 ? "" : "s"}.
+                    </p>
+                  </div>
+                  <div className="reportActions">
+                    <button
+                      className="secondaryButton"
+                      type="button"
+                      onClick={() => navigator.clipboard.writeText(insight.markdown)}
+                    >
+                      <Clipboard size={16} />
+                      Copy Markdown
+                    </button>
+                    <button className="secondaryButton" type="button" onClick={downloadInsight}>
+                      <FileDown size={16} />
+                      Download
+                    </button>
+                  </div>
+                </header>
+                <div className="reportStats">
+                  <span>
+                    <BookOpen size={15} />
+                    {insight.selected_conversation_ids.length} sources
+                  </span>
+                  {insight.performance?.chunk_count && (
+                    <span>{insight.performance.chunk_count} source groups</span>
+                  )}
+                  {insight.performance?.total_ms && (
+                    <span>
+                      <Clock3 size={15} />
+                      {(insight.performance.total_ms / 1000).toFixed(1)}s
+                    </span>
+                  )}
+                </div>
+                <article className="reportPaper">
+                  <MarkdownContent markdown={insight.markdown} onCitation={openCitation} />
+                </article>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="resultList">
+            {results.map((result) => (
+              <article key={result.id} className="resultRow">
+                <label className="checkCell" aria-label={`Select ${result.title}`}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(selectedById[result.id])}
+                    onChange={() => toggleSelection(result)}
+                  />
+                </label>
+                <div className="resultContent">
+                  <button className="resultTitleButton" onClick={() => openDetail(result.id)}>
+                    <strong>{result.title}</strong>
+                    <span>{result.source} - {result.raw_message_count} messages</span>
+                  </button>
+                  <div className="excerptList">
+                    {result.excerpts.map((excerpt) => (
+                      <div className="excerpt" key={excerpt.message_id}>
+                        <span className="excerptSource">
+                          [#{excerpt.message_index}] {excerpt.role}
+                        </span>
+                        <MarkdownContent markdown={excerpt.excerpt} compact />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </article>
+            ))}
+            {!results.length && <div className="emptyState">No search results yet.</div>}
+          </div>
+        )}
       </section>
 
       <aside className="selectionPane">
@@ -1063,15 +1238,15 @@ function App() {
             <button
               className="primaryButton"
               onClick={createInsight}
-              disabled={busy || !selectedIds.length}
+              disabled={busy || insightBusy || !selectedIds.length}
             >
-              {busy ? <Loader2 className="spin" size={16} /> : <Lightbulb size={16} />}
-              Generate Insight MD
+              {insightBusy ? <Loader2 className="spin" size={16} /> : <Lightbulb size={16} />}
+              {insight ? "Regenerate insight" : "Generate insight"}
             </button>
             <button
               className="secondaryButton"
               onClick={clearSelections}
-              disabled={!selectedIds.length}
+              disabled={insightBusy || !selectedIds.length}
               type="button"
             >
               <Trash2 size={15} />
@@ -1083,8 +1258,15 @@ function App() {
         <div className="selectedList">
           {selectedResults.map((result) => (
             <div className="selectedItem" key={result.id}>
-              <span>{result.title}</span>
-              <button onClick={() => removeSelection(result.id)} aria-label={`Remove ${result.title}`}>
+              <button className="selectedSource" type="button" onClick={() => openDetail(result.id)}>
+                <span>{result.title}</span>
+                <small>{result.source} · {result.raw_message_count} messages</small>
+              </button>
+              <button
+                onClick={() => removeSelection(result.id)}
+                aria-label={`Remove ${result.title}`}
+                disabled={insightBusy}
+              >
                 <X size={14} />
               </button>
             </div>
@@ -1096,30 +1278,33 @@ function App() {
 
         {detail && (
           <section className="detailPanel">
-            <h2>{detail.conversation.title}</h2>
+            <div className="detailHeading">
+              <div>
+                <span className="eyebrow">
+                  {detailMessageIndex === null ? "Source preview" : `Supporting message #${detailMessageIndex}`}
+                </span>
+                <h2>{detail.conversation.title}</h2>
+              </div>
+              <button
+                className="iconButton"
+                type="button"
+                aria-label="Close source preview"
+                onClick={() => setDetail(null)}
+              >
+                <X size={15} />
+              </button>
+            </div>
             <div className="messageList">
-              {detail.messages.slice(0, 24).map((message) => (
-                <div className="messageItem" key={message.id}>
+              {visibleDetailMessages.map((message) => (
+                <div
+                  className={message.index === detailMessageIndex ? "messageItem targetMessage" : "messageItem"}
+                  key={message.id}
+                >
                   <b>[{message.index}] {message.role}</b>
-                  <p>{message.content}</p>
+                  <MarkdownContent markdown={message.content} compact />
                 </div>
               ))}
             </div>
-          </section>
-        )}
-
-        {insight && (
-          <section className="insightPanel">
-            <div className="insightHeader">
-              <h2>{insight.title}</h2>
-              <button
-                onClick={() => navigator.clipboard.writeText(insight.markdown)}
-                aria-label="Copy Markdown"
-              >
-                <Download size={16} />
-              </button>
-            </div>
-            <pre>{insight.markdown}</pre>
           </section>
         )}
       </aside>
@@ -1167,6 +1352,15 @@ function formatImportStatus(summary: ImportSummary) {
     `${summary.inserted_messages} messages from ${summary.parsed_conversations} parsed conversations.` +
     skipped
   );
+}
+
+function delay(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+export function safeFilename(value: string) {
+  const filename = value.trim().replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "-");
+  return filename || "reweave-insight";
 }
 
 export function isModelUnavailable(

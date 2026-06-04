@@ -1,6 +1,7 @@
 """FastAPI backend tests."""
 
 import zipfile
+from time import sleep
 
 import pytest
 from fastapi.testclient import TestClient
@@ -525,3 +526,60 @@ def test_api_create_and_get_insight_with_fake_generator(monkeypatch, tmp_path, f
     get_response = client.get(f"/api/insights/{report['id']}")
     assert get_response.status_code == 200
     assert get_response.json()["markdown"] == report["markdown"]
+
+
+def test_api_insight_job_reports_progress_and_performance(monkeypatch, tmp_path, fixtures_dir):
+    db = tmp_path / "archive.db"
+    store = ArchiveStore(db)
+    store.import_directory(fixtures_dir)
+    conversation_id = store.search("Zettelkasten")[0].conversation_id
+
+    def fake_generate(
+        store,
+        *,
+        conversation_ids,
+        settings,
+        title="Connected Insights",
+        provider=None,
+        progress=None,
+        metrics=None,
+    ):
+        progress("loading", "Loading selected conversations", 0, 1)
+        progress("analyzing", "Analyzed 1 of 1 source groups", 1, 1)
+        metrics.update({"language": "en", "total_ms": 125.0, "chunk_count": 1})
+        return store.save_insight_report(
+            title=title,
+            selected_conversation_ids=conversation_ids,
+            provider=settings.provider,
+            model=settings.model,
+            markdown="## Overview\n\nFake\n",
+        )
+
+    monkeypatch.setattr(reweave.web, "generate_insight_report", fake_generate)
+    client = TestClient(create_app(db))
+
+    response = client.post(
+        "/api/insights/jobs",
+        json={
+            "conversation_ids": [conversation_id],
+            "title": "Async Insight",
+            "settings": {
+                "provider": "openai",
+                "model": "fake-model",
+                "api_key": "fake-key",
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    job_id = response.json()["id"]
+    for _ in range(20):
+        job = client.get(f"/api/insights/jobs/{job_id}").json()
+        if job["status"] == "completed":
+            break
+        sleep(0.01)
+
+    assert job["status"] == "completed"
+    assert job["progress"] == 100
+    assert job["result"]["language"] == "en"
+    assert job["result"]["performance"]["total_ms"] == 125.0

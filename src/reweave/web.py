@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import shutil
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from uuid import uuid4
 
@@ -103,6 +106,67 @@ def create_app(
     app_paths = get_app_paths(data_dir)
     profile_store = LLMProfileStore(app_paths.llm_profiles_path)
     ensure_default_profiles(profile_store)
+    insight_jobs: dict[str, dict[str, Any]] = {}
+    insight_jobs_lock = Lock()
+    insight_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="reweave-job")
+
+    def update_insight_job(job_id: str, **changes: Any) -> None:
+        with insight_jobs_lock:
+            insight_jobs[job_id].update(changes)
+
+    def run_insight_job(
+        job_id: str,
+        request: InsightRequest,
+        settings: LLMSettings,
+        provider: Any,
+    ) -> None:
+        metrics: dict[str, Any] = {}
+
+        def report_progress(stage: str, message: str, completed: int, total: int) -> None:
+            update_insight_job(
+                job_id,
+                status="running",
+                stage=stage,
+                message=message,
+                progress=_insight_job_progress(stage, completed, total),
+            )
+
+        try:
+            report = generate_insight_report(
+                store,
+                conversation_ids=request.conversation_ids,
+                title=request.title,
+                settings=settings,
+                provider=provider,
+                progress=report_progress,
+                metrics=metrics,
+            )
+        except (
+            ProviderConfigurationError,
+            ProviderRequestError,
+            httpx.HTTPError,
+            ValueError,
+        ) as exc:
+            update_insight_job(
+                job_id,
+                status="failed",
+                stage="failed",
+                message=_insight_job_error(exc),
+                error=_insight_job_error(exc),
+            )
+            return
+
+        result = _insight_report_to_dict(report)
+        result["language"] = metrics.get("language", "en")
+        result["performance"] = metrics
+        update_insight_job(
+            job_id,
+            status="completed",
+            stage="complete",
+            message="Insight report ready",
+            progress=100,
+            result=result,
+        )
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -455,6 +519,37 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _insight_report_to_dict(report)
 
+    @app.post("/api/insights/jobs", status_code=202)
+    def create_insight_job(request: InsightRequest) -> dict[str, Any]:
+        try:
+            settings, provider = _resolve_llm_settings(request.settings, profile_store)
+        except ProviderConfigurationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        job_id = uuid4().hex
+        job = {
+            "id": job_id,
+            "status": "queued",
+            "stage": "loading",
+            "message": "Preparing selected conversations",
+            "progress": 2,
+            "created_at": datetime.now(tz=UTC).isoformat(),
+            "result": None,
+            "error": None,
+        }
+        with insight_jobs_lock:
+            insight_jobs[job_id] = job
+        insight_executor.submit(run_insight_job, job_id, request, settings, provider)
+        return dict(job)
+
+    @app.get("/api/insights/jobs/{job_id}")
+    def get_insight_job(job_id: str) -> dict[str, Any]:
+        with insight_jobs_lock:
+            job = insight_jobs.get(job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail="Insight job not found.")
+            return dict(job)
+
     @app.get("/api/insights")
     def list_insights() -> dict[str, Any]:
         return {
@@ -631,3 +726,25 @@ def _insight_report_to_dict(report) -> dict[str, Any]:
     data = _insight_report_summary_to_dict(report)
     data["markdown"] = report.markdown
     return data
+
+
+def _insight_job_progress(stage: str, completed: int, total: int) -> int:
+    if stage == "loading":
+        return 5
+    if stage == "preparing":
+        return 15
+    if stage == "analyzing":
+        return 20 + round(55 * completed / max(total, 1))
+    if stage == "synthesizing":
+        return 82
+    if stage == "saving":
+        return 95
+    if stage == "complete":
+        return 100
+    return 2
+
+
+def _insight_job_error(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPError):
+        return f"The model request failed ({exc.__class__.__name__})."
+    return str(exc)
