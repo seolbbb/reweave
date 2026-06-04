@@ -318,7 +318,12 @@ def create_provider(settings: LLMSettings) -> LLMProvider:
             api_key=settings.api_key,
             base_url=settings.base_url or "https://api.openai.com/v1",
         )
-    if provider in {"openai-compatible", "compatible", "openrouter", "kimi"}:
+    if provider == "openrouter":
+        return OpenAICompatibleProvider(
+            api_key=settings.api_key,
+            base_url=settings.base_url or "https://openrouter.ai/api/v1",
+        )
+    if provider in {"openai-compatible", "compatible", "kimi"}:
         if not settings.base_url:
             raise ProviderConfigurationError("Base URL is required for compatible providers.")
         return OpenAICompatibleProvider(api_key=settings.api_key, base_url=settings.base_url)
@@ -341,10 +346,10 @@ def create_failover_provider(
 ) -> LLMProvider:
     """Build a provider that retries across saved API keys."""
     provider = settings.provider.lower().strip()
-    if provider in {"openai-compatible", "compatible", "openrouter", "kimi"}:
+    if provider in {"openai-compatible", "compatible", "kimi"}:
         if not settings.base_url:
             raise ProviderConfigurationError("Base URL is required for compatible providers.")
-    elif provider not in {"openai", "anthropic", "gemini"}:
+    elif provider not in {"openai", "anthropic", "gemini", "openrouter"}:
         raise ProviderConfigurationError(f"Unsupported provider: {settings.provider}")
     return FailoverLLMProvider(settings, credentials)
 
@@ -413,12 +418,15 @@ def _fetch_available_models(settings: LLMSettings, api_key: str) -> list[str]:
     if provider == "openai":
         base_url = settings.base_url or "https://api.openai.com/v1"
         headers = {"Authorization": f"Bearer {api_key}"}
-    elif provider in {"openai-compatible", "compatible", "openrouter", "kimi"}:
+    elif provider in {"openai-compatible", "compatible", "kimi"}:
         if not settings.base_url:
             raise ProviderConfigurationError(
                 "Save a base URL before loading models for this provider."
             )
         base_url = settings.base_url
+        headers = {"Authorization": f"Bearer {api_key}"}
+    elif provider == "openrouter":
+        base_url = settings.base_url or "https://openrouter.ai/api/v1"
         headers = {"Authorization": f"Bearer {api_key}"}
     elif provider == "anthropic":
         base_url = settings.base_url or "https://api.anthropic.com/v1"

@@ -147,6 +147,32 @@ def test_api_llm_profile_key_crud_keeps_secret_out_of_json(monkeypatch, tmp_path
     assert "secret-value" not in profiles_file.read_text(encoding="utf-8")
 
 
+def test_api_llm_profiles_adds_new_default_provider_without_replacing_existing(
+    monkeypatch, tmp_path
+):
+    fake_keyring(monkeypatch)
+    data_dir = tmp_path / "app-data"
+    client = TestClient(create_app(tmp_path / "archive.db", data_dir=data_dir))
+    profiles = client.get("/api/llm/profiles").json()["profiles"]
+    openrouter = next(profile for profile in profiles if profile["provider"] == "openrouter")
+
+    client.put(
+        f"/api/llm/profiles/{openrouter['id']}",
+        json={
+            "name": "My OpenRouter",
+            "provider": "openrouter",
+            "default_model": "openrouter/model",
+        },
+    )
+    restarted = TestClient(create_app(tmp_path / "archive.db", data_dir=data_dir))
+    refreshed = restarted.get("/api/llm/profiles").json()["profiles"]
+
+    assert len([profile for profile in refreshed if profile["provider"] == "openrouter"]) == 1
+    assert next(profile for profile in refreshed if profile["provider"] == "openrouter")[
+        "name"
+    ] == "My OpenRouter"
+
+
 def test_api_llm_models_uses_provider_response_and_saved_key(monkeypatch, tmp_path):
     fake_keyring(monkeypatch)
     client = TestClient(create_app(tmp_path / "archive.db", data_dir=tmp_path / "app-data"))
@@ -236,6 +262,35 @@ def test_api_llm_connect_validates_before_saving_and_selects_model(monkeypatch, 
     assert response.json()["profile"]["masked_key"] == "************"
     assert "new-secret" not in response.text
     assert list(secrets.values()) == ["new-secret"]
+
+
+def test_api_llm_connect_uses_openrouter_default_base_url(monkeypatch, tmp_path):
+    fake_keyring(monkeypatch)
+    client = TestClient(create_app(tmp_path / "archive.db", data_dir=tmp_path / "app-data"))
+    profile = next(
+        item
+        for item in client.get("/api/llm/profiles").json()["profiles"]
+        if item["provider"] == "openrouter"
+    )
+
+    def fake_get(url, *, headers, params, timeout):
+        assert url == "https://openrouter.ai/api/v1/models"
+        request = reweave.llm.httpx.Request("GET", url)
+        return reweave.llm.httpx.Response(
+            200,
+            json={"data": [{"id": "openrouter/model"}]},
+            request=request,
+        )
+
+    monkeypatch.setattr(reweave.llm.httpx, "get", fake_get)
+    response = client.post(
+        f"/api/llm/profiles/{profile['id']}/connect",
+        json={"api_key": "arbitrary-openrouter-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["profile"]["provider"] == "openrouter"
+    assert response.json()["profile"]["base_url"] == ""
 
 
 def test_api_llm_connect_rejects_invalid_key_without_saving_it(monkeypatch, tmp_path):

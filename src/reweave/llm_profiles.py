@@ -307,15 +307,17 @@ DEFAULT_PROFILE_SEEDS = (
     ProfileSeed("OpenAI", "openai", "gpt-4o-mini"),
     ProfileSeed("Anthropic", "anthropic", "claude-3-5-sonnet-latest"),
     ProfileSeed("Gemini", "gemini", "gemini-1.5-flash"),
+    ProfileSeed("OpenRouter", "openrouter", ""),
     ProfileSeed("OpenAI Compatible", "openai-compatible", ""),
 )
 
 
 def ensure_default_profiles(store: LLMProfileStore) -> None:
     stored = store.list()
-    if stored.profiles:
-        return
+    existing_providers = {profile.provider for profile in stored.profiles}
     for seed in DEFAULT_PROFILE_SEEDS:
+        if seed.provider in existing_providers:
+            continue
         store.create(
             ProfileInput(
                 name=seed.name,

@@ -57,4 +57,5 @@ describe("frontend state helpers", () => {
     expect(modelErrorStatus(429)).toBe("rate-limit");
     expect(modelErrorStatus(502)).toBe("network");
   });
+
 });

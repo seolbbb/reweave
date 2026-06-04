@@ -57,5 +57,9 @@ keyring. A connected provider shows only a masked key, the selected model, and c
 change the key, reconnect, or remove the connection. Base URL overrides and additional model IDs
 remain available in a closed **Advanced settings** section.
 
+OpenRouter is a dedicated provider option with its endpoint configured internally. Reweave does not
+inspect API key prefixes to guess a provider. Unknown OpenAI-compatible services still require an
+explicit Base URL.
+
 The selected model is persisted. Refresh preserves it when it remains available and clearly marks
 it unavailable when the provider no longer returns it.

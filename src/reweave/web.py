@@ -304,11 +304,12 @@ def create_app(
         custom_models = tuple(
             dict.fromkeys(model.strip() for model in request.custom_models if model.strip())
         )
+        base_url = request.base_url.strip()
         settings = LLMSettings(
             provider=profile.provider,
             model=profile.default_model,
             api_key="",
-            base_url=request.base_url.strip(),
+            base_url=base_url,
         )
         pending_key = LLMKeyCredential(
             key_id="pending",
@@ -335,7 +336,7 @@ def create_app(
             ProfileInput(
                 name=profile.name,
                 provider=profile.provider,
-                base_url=request.base_url,
+                base_url=base_url,
                 default_model=selected_model,
                 custom_models=custom_models,
             ),

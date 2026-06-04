@@ -184,6 +184,11 @@ const providerDetails: Record<string, { label: string; keyUrl?: string; keyHelp:
     keyUrl: "https://aistudio.google.com/app/apikey",
     keyHelp: "Create a key in Google AI Studio."
   },
+  openrouter: {
+    label: "OpenRouter",
+    keyUrl: "https://openrouter.ai/settings/keys",
+    keyHelp: "Create a key in OpenRouter. The endpoint is configured automatically."
+  },
   "openai-compatible": {
     label: "OpenAI-compatible",
     keyHelp: "Use the API key and base URL from your provider."
