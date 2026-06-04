@@ -16,6 +16,15 @@ type MarkdownContentProps = {
 
 export function MarkdownContent({ markdown, compact = false, onCitation }: MarkdownContentProps) {
   const components: Components = {
+    h1({ children }) {
+      return <h1 id={headingId(children)}>{children}</h1>;
+    },
+    h2({ children }) {
+      return <h2 id={headingId(children)}>{children}</h2>;
+    },
+    h3({ children }) {
+      return <h3 id={headingId(children)}>{children}</h3>;
+    },
     a({ href, children }) {
       const citation = href ? parseCitationHref(href) : null;
       if (citation && onCitation) {
@@ -55,6 +64,14 @@ export function MarkdownContent({ markdown, compact = false, onCitation }: Markd
       </ReactMarkdown>
     </div>
   );
+}
+
+function headingId(children: React.ReactNode) {
+  return React.Children.toArray(children)
+    .join(" ")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 export function safeMarkdownUrl(url: string) {

@@ -17,6 +17,7 @@ import {
   parseCitationHref,
   safeMarkdownUrl
 } from "./MarkdownContent";
+import { Workspace } from "./Workspace";
 
 const result: SearchResult = {
   id: "conversation-1",
@@ -110,4 +111,14 @@ describe("frontend state helpers", () => {
     expect(safeFilename('Insights: AI / "careers"')).toBe("Insights- AI - -careers-");
   });
 
+  it("starts in the dedicated search workspace with shared primary navigation", () => {
+    const html = renderToStaticMarkup(createElement(Workspace));
+
+    expect(html).toContain("Search your archive");
+    expect(html).toContain("Sources for insight");
+    expect(html).toContain("Reports");
+    expect(html).toContain("Import");
+    expect(html).toContain("Settings");
+    expect(html).not.toContain("Report outline");
+  });
 });
