@@ -75,3 +75,21 @@ reweave/
 ├── README.md           # Project readme
 └── AGENTS.md           # This file
 ```
+
+---
+
+## CRITICAL: COMPLETION REQUIRES A WINDOWS EXECUTABLE BUILD
+
+Every implementation task MUST include a fresh PyInstaller build before the work is considered complete.
+
+1. If frontend files changed, run `npm run build` from `frontend/` first so the packaged web assets are current.
+2. From the repository root, run:
+
+   ```powershell
+   .venv\Scripts\pyinstaller.exe --noconfirm --clean packaging\Reweave.spec
+   ```
+
+3. Confirm that `dist\Reweave\Reweave.exe` was created successfully.
+4. Report the PyInstaller build result in the final response.
+
+Do not mark any task complete or create its final commit until this executable build succeeds.

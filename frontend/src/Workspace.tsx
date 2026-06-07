@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -30,7 +30,13 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import { MarkdownContent, type CitationTarget } from "./MarkdownContent";
+import {
+  MarkdownContent,
+  extractMarkdownHeadings,
+  type CitationTarget,
+  type MarkdownHeading
+} from "./MarkdownContent";
+import { HighlightedText, extractHighlightTerms } from "./textHighlight";
 
 type View = "search" | "reports" | "import" | "settings";
 
@@ -240,11 +246,6 @@ export function Workspace() {
         .filter((source): source is SearchResult => Boolean(source)) ?? [],
     [insight, reportSources]
   );
-  const visibleMessages = useMemo(() => {
-    if (!detail) return [];
-    if (detailMessageIndex === null) return detail.messages.slice(0, 24);
-    return detail.messages.filter((message) => Math.abs(message.index - detailMessageIndex) <= 2);
-  }, [detail, detailMessageIndex]);
   const archiveConversationCount = sourceFacets.reduce((total, facet) => total + facet.conversations, 0);
   const archiveMessageCount = sourceFacets.reduce((total, facet) => total + facet.messages, 0);
   const modelReady = activeProfile?.connected && modelLoad.status === "success" && Boolean(model);
@@ -689,7 +690,6 @@ export function Workspace() {
           activeProfile={activeProfile}
           model={model}
           detail={detail}
-          visibleMessages={visibleMessages}
           detailMessageIndex={detailMessageIndex}
           closeDetail={() => setDetail(null)}
         />
@@ -701,7 +701,6 @@ export function Workspace() {
           insightJob={insightJob}
           reportSources={reportSourceList}
           detail={detail}
-          visibleMessages={visibleMessages}
           detailMessageIndex={detailMessageIndex}
           openReport={openReport}
           openDetail={openDetail}
@@ -835,12 +834,13 @@ type SearchViewProps = {
   activeProfile?: LLMProfile;
   model: string;
   detail: ConversationDetail | null;
-  visibleMessages: Message[];
   detailMessageIndex: number | null;
   closeDetail: () => void;
 };
 
 function SearchView(props: SearchViewProps) {
+  const highlightTerms = useMemo(() => extractHighlightTerms(props.query), [props.query]);
+
   return (
     <section className="searchScreen">
       <div className="searchWorkspace">
@@ -929,13 +929,13 @@ function SearchView(props: SearchViewProps) {
               </button>
               <button className="resultBody" type="button" onClick={() => props.openDetail(result.id)}>
                 <span className="resultHeading">
-                  <strong>{result.title}</strong>
+                  <strong><HighlightedText text={result.title} terms={highlightTerms} /></strong>
                   <small>{result.source} · {formatDate(result.created_at)} · {result.raw_message_count} messages</small>
                 </span>
                 <span className="excerptList">
                   {result.excerpts.slice(0, 2).map((excerpt) => (
                     <span className="excerpt" key={excerpt.message_id}>
-                      <MarkdownContent markdown={excerpt.excerpt} compact />
+                      <MarkdownContent markdown={excerpt.excerpt} compact highlightTerms={highlightTerms} />
                     </span>
                   ))}
                 </span>
@@ -954,7 +954,17 @@ function SearchView(props: SearchViewProps) {
           )}
         </div>
       </div>
-      <aside className="sourceRail">
+      <aside className={props.detail ? "sourceRail drawerOpen" : "sourceRail"}>
+        {props.detail ? (
+          <ConversationDrawer
+            detail={props.detail}
+            targetIndex={props.detailMessageIndex}
+            close={props.closeDetail}
+            label="Source preview"
+            highlightTerms={highlightTerms}
+          />
+        ) : (
+          <>
         <div className="railHeader">
           <div>
             <h2>Sources for insight</h2>
@@ -967,7 +977,7 @@ function SearchView(props: SearchViewProps) {
         <div className="selectedSources">
           {props.selectedResults.map((result) => (
             <div className="selectedSource" key={result.id}>
-              <button className="sourceOpen" type="button" onClick={() => props.openDetail(result.id)}>
+              <button className="sourceOpen" type="button" onClick={() => props.openDetail(result.id)} title={result.title}>
                 <span className="providerMark small">{result.source === "chatgpt" ? "G" : "AI"}</span>
                 <span><strong>{result.title}</strong><small>{result.source} · {result.raw_message_count} messages</small></span>
               </button>
@@ -990,14 +1000,7 @@ function SearchView(props: SearchViewProps) {
           <i /> {props.modelReady ? "Model ready" : "Configure model in Settings"}
           {props.modelReady && <span>{providerDetails[props.activeProfile?.provider ?? ""]?.label} · {props.model}</span>}
         </div>
-        {props.detail && (
-          <SourcePreview
-            detail={props.detail}
-            messages={props.visibleMessages}
-            targetIndex={props.detailMessageIndex}
-            close={props.closeDetail}
-            label="Source preview"
-          />
+          </>
         )}
       </aside>
     </section>
@@ -1010,7 +1013,6 @@ function ReportsView({
   insightJob,
   reportSources,
   detail,
-  visibleMessages,
   detailMessageIndex,
   openReport,
   openDetail,
@@ -1025,7 +1027,6 @@ function ReportsView({
   insightJob: InsightJob | null;
   reportSources: SearchResult[];
   detail: ConversationDetail | null;
-  visibleMessages: Message[];
   detailMessageIndex: number | null;
   openReport: (id: string) => void;
   openDetail: (id: string) => void;
@@ -1035,6 +1036,68 @@ function ReportsView({
   regenerate: () => void;
   downloadInsight: () => void;
 }) {
+  const reportCanvasRef = useRef<HTMLDivElement | null>(null);
+  const markdownOutline = useMemo(
+    () => extractMarkdownHeadings(insight?.markdown ?? ""),
+    [insight?.markdown]
+  );
+  const outlineItems = useMemo<MarkdownHeading[]>(
+    () =>
+      markdownOutline.length || !insight
+        ? markdownOutline
+        : [{ id: "report-top", level: 1, text: insight.title }],
+    [insight, markdownOutline]
+  );
+  const [activeOutlineId, setActiveOutlineId] = useState("");
+
+  const updateActiveOutline = useCallback(() => {
+    const root = reportCanvasRef.current;
+    if (!root || !outlineItems.length) return;
+
+    const rootTop = root.getBoundingClientRect().top;
+    const isAtBottom = root.scrollTop + root.clientHeight >= root.scrollHeight - 2;
+    if (isAtBottom) {
+      const bottomId = outlineItems[outlineItems.length - 1].id;
+      setActiveOutlineId((current) => (current === bottomId ? current : bottomId));
+      return;
+    }
+
+    let nextActiveId = outlineItems[0].id;
+
+    for (const item of outlineItems) {
+      const element = document.getElementById(item.id);
+      if (!element) continue;
+      const distanceFromCanvasTop = element.getBoundingClientRect().top - rootTop;
+      if (distanceFromCanvasTop <= 96) nextActiveId = item.id;
+      else break;
+    }
+
+    setActiveOutlineId((current) => (current === nextActiveId ? current : nextActiveId));
+  }, [outlineItems]);
+
+  useEffect(() => {
+    setActiveOutlineId(outlineItems[0]?.id ?? "");
+    const frame = window.requestAnimationFrame(updateActiveOutline);
+    return () => window.cancelAnimationFrame(frame);
+  }, [insight?.id, outlineItems, updateActiveOutline]);
+
+  function scrollToOutlineItem(id: string) {
+    setActiveOutlineId(id);
+    const root = reportCanvasRef.current;
+    const element = document.getElementById(id);
+    if (!root || !element) return;
+    const rootTop = root.getBoundingClientRect().top;
+    const elementTop = element.getBoundingClientRect().top;
+    const nextTop = root.scrollTop + elementTop - rootTop - 24;
+    root.scrollTo({
+      top: nextTop,
+      behavior: "smooth"
+    });
+    window.setTimeout(() => {
+      if (Math.abs(root.scrollTop - nextTop) > 4) root.scrollTop = nextTop;
+    }, 160);
+  }
+
   return (
     <section className="reportsScreen">
       <header className="reportToolbar">
@@ -1052,10 +1115,19 @@ function ReportsView({
       </header>
       <aside className="reportIndex">
         <h2>Report outline</h2>
-        <nav>
-          {["Overview", "Key concepts", "Connections between conversations", "Contradictions and patterns", "Suggested follow-up questions"].map((section, index) => (
-            <a className={index === 0 ? "active" : ""} href={`#${slug(section)}`} key={section}>{section}</a>
+        <nav aria-label="Report outline">
+          {outlineItems.map((section) => (
+            <button
+              className={activeOutlineId === section.id ? `active depth-${section.level}` : `depth-${section.level}`}
+              type="button"
+              onClick={() => scrollToOutlineItem(section.id)}
+              aria-current={activeOutlineId === section.id ? "location" : undefined}
+              key={section.id}
+            >
+              {section.text}
+            </button>
           ))}
+          {!outlineItems.length && <p>No outline available.</p>}
         </nav>
         <div className="recentReports">
           <h2>Recent reports</h2>
@@ -1069,7 +1141,7 @@ function ReportsView({
           {!reports.length && <p>No saved reports yet.</p>}
         </div>
       </aside>
-      <div className="reportCanvas">
+      <div className="reportCanvas" ref={reportCanvasRef} onScroll={updateActiveOutline}>
         {insightJob && (
           <section className="generationCard" aria-live="polite">
             <span className="generationIcon"><Sparkles size={23} /></span>
@@ -1085,7 +1157,7 @@ function ReportsView({
           </section>
         )}
         {!insightJob && insight && (
-          <article className="reportPaper">
+          <article className="reportPaper" id="report-top">
             <header className="reportHero">
               <span className="sectionLabel">Source-grounded insight report</span>
               <h1>{insight.title}</h1>
@@ -1107,55 +1179,116 @@ function ReportsView({
           </div>
         )}
       </div>
-      <aside className="reportSources">
+      <aside className={detail ? "reportSources drawerOpen" : "reportSources"}>
+        {detail ? (
+          <ConversationDrawer
+            detail={detail}
+            targetIndex={detailMessageIndex}
+            close={closeDetail}
+            label={detailMessageIndex === null ? "Source conversation" : `Supporting message #${detailMessageIndex}`}
+          />
+        ) : (
+          <>
         <div className="railHeader"><div><h2>Report sources</h2><p>{reportSources.length} sources</p></div></div>
         <div className="reportSourceList">
           {reportSources.map((source) => (
-            <button className={detail?.conversation.id === source.id ? "active" : ""} type="button" onClick={() => openDetail(source.id)} key={source.id}>
+                <button
+                  type="button"
+                  onClick={() => openDetail(source.id)}
+                  title={source.title}
+                  key={source.id}
+                >
               <span className="providerMark small">{source.source === "chatgpt" ? "G" : "AI"}</span>
               <span><strong>{source.title}</strong><small>{source.source} · {source.raw_message_count} messages</small></span>
               <ChevronRight size={15} />
             </button>
           ))}
         </div>
-        {detail && (
-          <SourcePreview
-            detail={detail}
-            messages={visibleMessages}
-            targetIndex={detailMessageIndex}
-            close={closeDetail}
-            label={detailMessageIndex === null ? "Source conversation" : `Supporting message #${detailMessageIndex}`}
-          />
+          </>
         )}
       </aside>
     </section>
   );
 }
 
-function SourcePreview({
+function ConversationDrawer({
   detail,
-  messages,
   targetIndex,
   close,
-  label
+  label,
+  highlightTerms = []
 }: {
   detail: ConversationDetail;
-  messages: Message[];
   targetIndex: number | null;
   close: () => void;
   label: string;
+  highlightTerms?: string[];
 }) {
+  const [viewMode, setViewMode] = useState<"all" | "context">(targetIndex === null ? "all" : "context");
+  const targetRef = useRef<HTMLElement | null>(null);
+  const canShowContext = targetIndex !== null;
+  const messages = useMemo(
+    () =>
+      viewMode === "context" && targetIndex !== null
+        ? detail.messages.filter((message) => Math.abs(message.index - targetIndex) <= 2)
+        : detail.messages,
+    [detail.messages, targetIndex, viewMode]
+  );
+
+  useEffect(() => {
+    setViewMode(targetIndex === null ? "all" : "context");
+  }, [detail.conversation.id, targetIndex]);
+
+  useEffect(() => {
+    if (targetIndex === null) return;
+    window.requestAnimationFrame(() => {
+      targetRef.current?.scrollIntoView({ block: "center" });
+    });
+  }, [detail.conversation.id, targetIndex, viewMode]);
+
+  function jumpToTarget() {
+    if (targetIndex === null) return;
+    if (viewMode !== "all") {
+      setViewMode("all");
+      return;
+    }
+    targetRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
   return (
-    <section className="sourcePreview">
-      <header>
-        <div><span className="sectionLabel">{label}</span><h2>{detail.conversation.title}</h2></div>
-        <button type="button" onClick={close} aria-label="Close source preview"><X size={17} /></button>
+    <section className="conversationDrawer" aria-label={label}>
+      <header className="conversationDrawerHeader">
+        <div>
+          <span className="sectionLabel">{label}</span>
+          <h2 title={detail.conversation.title}>{detail.conversation.title}</h2>
+          <p>
+            {detail.conversation.source} / {detail.conversation.raw_message_count} messages / {formatDate(detail.conversation.created_at)}
+          </p>
+        </div>
+        <button type="button" onClick={close} aria-label="Close conversation drawer"><X size={17} /></button>
       </header>
-      <div className="messageList">
+      {canShowContext && (
+        <div className="drawerControls" role="group" aria-label="Conversation view">
+          <button className={viewMode === "context" ? "active" : ""} type="button" onClick={() => setViewMode("context")}>
+            Context around #{targetIndex}
+          </button>
+          <button className={viewMode === "all" ? "active" : ""} type="button" onClick={() => setViewMode("all")}>
+            All messages
+          </button>
+          <button type="button" onClick={jumpToTarget}>
+            Jump to #{targetIndex}
+          </button>
+        </div>
+      )}
+      <div className="messageList drawerMessageList">
         {messages.map((message) => (
-          <article className={message.index === targetIndex ? "messageItem target" : "messageItem"} key={message.id}>
+          <article
+            className={message.index === targetIndex ? "messageItem target" : "messageItem"}
+            ref={message.index === targetIndex ? targetRef : undefined}
+            key={message.id}
+          >
             <header><strong>{message.role}</strong><small>#{message.index}</small></header>
-            <MarkdownContent markdown={message.content} compact />
+            <MarkdownContent markdown={message.content} variant="conversation" highlightTerms={highlightTerms} />
           </article>
         ))}
       </div>
@@ -1355,10 +1488,6 @@ function formatDate(value: string) {
   return Number.isNaN(date.valueOf())
     ? value
     : new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date);
-}
-
-function slug(value: string) {
-  return value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 function splitModels(value: string) {
