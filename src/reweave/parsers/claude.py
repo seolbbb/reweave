@@ -54,9 +54,11 @@ class ClaudeParser:
             if normalized is not None:
                 messages.append(normalized)
 
-        conv_id = self._make_id("claude", title, created_at)
+        source_id = str(raw.get("uuid") or raw.get("id") or "") or None
+        conv_id = self._make_id("claude", source_id or created_at)
         return NormalizedConversation(
             id=conv_id,
+            source_id=source_id,
             title=title,
             source="claude",
             created_at=created_at,
@@ -97,9 +99,10 @@ class ClaudeParser:
             role=role,
             content=text,
             timestamp=timestamp,
+            source_id=str(msg.get("uuid") or msg.get("id") or "") or None,
         )
 
     @staticmethod
-    def _make_id(source: str, title: str, created_at: str) -> str:
-        raw = f"{source}:{title}:{created_at}"
+    def _make_id(source: str, stable_source_value: str) -> str:
+        raw = f"{source}:{stable_source_value}"
         return hashlib.sha256(raw.encode()).hexdigest()[:16]

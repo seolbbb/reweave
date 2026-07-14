@@ -17,11 +17,13 @@ class AppPaths:
     imports_dir: Path
     extracted_dir: Path
     llm_profiles_path: Path
+    models_dir: Path
 
     def ensure(self) -> AppPaths:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.imports_dir.mkdir(parents=True, exist_ok=True)
         self.extracted_dir.mkdir(parents=True, exist_ok=True)
+        self.models_dir.mkdir(parents=True, exist_ok=True)
         return self
 
 
@@ -33,4 +35,5 @@ def get_app_paths(data_dir: Path | None = None) -> AppPaths:
         imports_dir=root / "imports",
         extracted_dir=root / "extracted",
         llm_profiles_path=root / "llm_profiles.json",
+        models_dir=root / "models",
     ).ensure()

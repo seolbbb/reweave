@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr
 
 from reweave.archive import ArchiveStore, ImportSummary
+from reweave.archive_answers import answer_archive
 from reweave.insights import generate_insight_report
 from reweave.llm import (
     LLMSettings,
@@ -38,6 +39,7 @@ from reweave.llm_profiles import (
     ensure_default_profiles,
 )
 from reweave.paths import get_app_paths
+from reweave.semantic import SearchEngine, SemanticIndex, SemanticUnavailableError
 
 UPLOAD_FILES = File(...)
 
@@ -63,6 +65,20 @@ class LLMSettingsRequest(BaseModel):
 class InsightRequest(BaseModel):
     conversation_ids: list[str]
     title: str = "Connected Insights"
+    settings: LLMSettingsRequest
+
+
+class SemanticIndexRequest(BaseModel):
+    rebuild: bool = False
+
+
+class ArchiveAnswerRequest(BaseModel):
+    question: str
+    mode: str = "auto"
+    provider: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    title: str | None = None
     settings: LLMSettingsRequest
 
 
@@ -106,13 +122,29 @@ def create_app(
     app_paths = get_app_paths(data_dir)
     profile_store = LLMProfileStore(app_paths.llm_profiles_path)
     ensure_default_profiles(profile_store)
+    semantic_index = SemanticIndex(db_path, app_paths.models_dir)
+    search_engine = SearchEngine(store, semantic_index)
     insight_jobs: dict[str, dict[str, Any]] = {}
     insight_jobs_lock = Lock()
     insight_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="reweave-job")
+    semantic_jobs: dict[str, dict[str, Any]] = {}
+    semantic_jobs_lock = Lock()
+    semantic_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="reweave-index")
+    answer_jobs: dict[str, dict[str, Any]] = {}
+    answer_jobs_lock = Lock()
+    answer_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="reweave-answer")
 
     def update_insight_job(job_id: str, **changes: Any) -> None:
         with insight_jobs_lock:
             insight_jobs[job_id].update(changes)
+
+    def update_semantic_job(job_id: str, **changes: Any) -> None:
+        with semantic_jobs_lock:
+            semantic_jobs[job_id].update(changes)
+
+    def update_answer_job(job_id: str, **changes: Any) -> None:
+        with answer_jobs_lock:
+            answer_jobs[job_id].update(changes)
 
     def run_insight_job(
         job_id: str,
@@ -168,6 +200,107 @@ def create_app(
             result=result,
         )
 
+    def run_semantic_job(job_id: str, rebuild: bool) -> None:
+        def report_progress(stage: str, completed: int, total: int) -> None:
+            progress = 100 if stage == "complete" else round(5 + 90 * completed / max(total, 1))
+            update_semantic_job(
+                job_id,
+                status="completed" if stage == "complete" else "running",
+                stage=stage,
+                message=(
+                    "Smart search is ready"
+                    if stage == "complete"
+                    else f"Indexed {completed} of {total} source chunks"
+                ),
+                progress=progress,
+            )
+
+        try:
+            status = semantic_index.build(rebuild=rebuild, progress=report_progress)
+        except Exception as exc:  # Background job must report model and network failures.
+            update_semantic_job(
+                job_id,
+                status="failed",
+                stage="failed",
+                message=str(exc),
+                error=str(exc),
+            )
+            return
+        update_semantic_job(
+            job_id,
+            status="completed",
+            stage="complete",
+            message="Smart search is ready",
+            progress=100,
+            result=status.to_dict(),
+        )
+
+    def run_answer_job(
+        job_id: str,
+        request: ArchiveAnswerRequest,
+        settings: LLMSettings,
+        llm_provider: Any,
+    ) -> None:
+        def report_progress(stage: str, message: str, completed: int, total: int) -> None:
+            stage_progress = {
+                "searching": 10,
+                "preparing": 30,
+                "answering": 55,
+                "validating": 85,
+                "complete": 100,
+            }
+            update_answer_job(
+                job_id,
+                status="completed" if stage == "complete" else "running",
+                stage=stage,
+                message=message,
+                progress=stage_progress.get(stage, 5),
+            )
+
+        try:
+            answer = answer_archive(
+                store,
+                search_engine,
+                question=request.question,
+                settings=settings,
+                mode=request.mode,
+                provider_filter=request.provider,
+                date_from=request.date_from,
+                date_to=request.date_to,
+                title=request.title,
+                provider=llm_provider,
+                progress=report_progress,
+            )
+        except (
+            ProviderConfigurationError,
+            ProviderRequestError,
+            SemanticUnavailableError,
+            httpx.HTTPError,
+            ValueError,
+        ) as exc:
+            update_answer_job(
+                job_id,
+                status="failed",
+                stage="failed",
+                message=_insight_job_error(exc),
+                error=_insight_job_error(exc),
+            )
+            return
+        update_answer_job(
+            job_id,
+            status="completed",
+            stage="complete",
+            message="Archive answer ready",
+            progress=100,
+            result={
+                "question": answer.question,
+                "markdown": answer.markdown,
+                "mode_used": answer.mode_used,
+                "language": answer.language,
+                "sources": [source.__dict__ for source in answer.sources],
+            },
+        )
+
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -179,6 +312,7 @@ def create_app(
             "db_path": str(db_path),
             "imports_dir": str(app_paths.imports_dir),
             "extracted_dir": str(app_paths.extracted_dir),
+            "models_dir": str(app_paths.models_dir),
         }
 
     @app.get("/api/facets")
@@ -198,21 +332,109 @@ def create_app(
     @app.get("/api/search")
     def search(
         q: str,
+        mode: str = "auto",
         provider: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         title: str | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
-        results = store.search_conversations(
-            q,
-            provider=provider,
-            date_from=date_from,
-            date_to=date_to,
-            title=title,
-            limit=limit,
-        )
-        return {"results": [_conversation_search_result_to_dict(result) for result in results]}
+        try:
+            results, mode_used = search_engine.search_conversations(
+                q,
+                mode=mode,
+                provider=provider,
+                date_from=date_from,
+                date_to=date_to,
+                title=title,
+                limit=limit,
+            )
+        except SemanticUnavailableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "query": q,
+            "mode_used": mode_used,
+            "semantic_status": semantic_index.status().to_dict(),
+            "results": [_conversation_search_result_to_dict(result) for result in results],
+        }
+
+    @app.get("/api/semantic/status")
+    def semantic_status() -> dict[str, object]:
+        return semantic_index.status().to_dict()
+
+    @app.post("/api/semantic/index/jobs", status_code=202)
+    def create_semantic_index_job(request: SemanticIndexRequest) -> dict[str, Any]:
+        with semantic_jobs_lock:
+            active = next(
+                (job for job in semantic_jobs.values() if job["status"] in {"queued", "running"}),
+                None,
+            )
+            if active is not None:
+                return dict(active)
+            job_id = uuid4().hex
+            job = {
+                "id": job_id,
+                "status": "queued",
+                "stage": "preparing",
+                "message": "Preparing the local semantic model",
+                "progress": 2,
+                "created_at": datetime.now(tz=UTC).isoformat(),
+                "result": None,
+                "error": None,
+            }
+            semantic_jobs[job_id] = job
+        semantic_executor.submit(run_semantic_job, job_id, request.rebuild)
+        return dict(job)
+
+    @app.get("/api/semantic/index/jobs/{job_id}")
+    def get_semantic_index_job(job_id: str) -> dict[str, Any]:
+        with semantic_jobs_lock:
+            job = semantic_jobs.get(job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail="Semantic index job not found.")
+            return dict(job)
+
+    @app.delete("/api/semantic/index")
+    def delete_semantic_index() -> dict[str, object]:
+        semantic_index.delete_index()
+        return semantic_index.status().to_dict()
+
+    @app.delete("/api/semantic/model")
+    def delete_semantic_model() -> dict[str, object]:
+        semantic_index.delete_model()
+        return semantic_index.status().to_dict()
+
+    @app.post("/api/archive-answers/jobs", status_code=202)
+    def create_archive_answer_job(request: ArchiveAnswerRequest) -> dict[str, Any]:
+        try:
+            settings, llm_provider = _resolve_llm_settings(request.settings, profile_store)
+        except ProviderConfigurationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        job_id = uuid4().hex
+        job = {
+            "id": job_id,
+            "status": "queued",
+            "stage": "searching",
+            "message": "Searching your local archive",
+            "progress": 2,
+            "created_at": datetime.now(tz=UTC).isoformat(),
+            "result": None,
+            "error": None,
+        }
+        with answer_jobs_lock:
+            answer_jobs[job_id] = job
+        answer_executor.submit(run_answer_job, job_id, request, settings, llm_provider)
+        return dict(job)
+
+    @app.get("/api/archive-answers/jobs/{job_id}")
+    def get_archive_answer_job(job_id: str) -> dict[str, Any]:
+        with answer_jobs_lock:
+            job = answer_jobs.get(job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail="Archive answer job not found.")
+            return dict(job)
 
     @app.get("/api/conversations/{conversation_id}")
     def conversation_detail(conversation_id: str) -> dict[str, Any]:
@@ -601,7 +823,10 @@ def _import_summary_to_dict(summary: ImportSummary) -> dict[str, Any]:
     return {
         "parsed_conversations": summary.parsed_conversations,
         "inserted_conversations": summary.inserted_conversations,
+        "updated_conversations": summary.updated_conversations,
         "inserted_messages": summary.inserted_messages,
+        "updated_messages": summary.updated_messages,
+        "invalidated_embeddings": summary.invalidated_embeddings,
         "skipped_files": [str(path) for path in summary.skipped_files],
     }
 
@@ -610,7 +835,10 @@ def _merge_import_summaries(summaries: list[ImportSummary]) -> ImportSummary:
     return ImportSummary(
         parsed_conversations=sum(summary.parsed_conversations for summary in summaries),
         inserted_conversations=sum(summary.inserted_conversations for summary in summaries),
+        updated_conversations=sum(summary.updated_conversations for summary in summaries),
         inserted_messages=sum(summary.inserted_messages for summary in summaries),
+        updated_messages=sum(summary.updated_messages for summary in summaries),
+        invalidated_embeddings=sum(summary.invalidated_embeddings for summary in summaries),
         skipped_files=tuple(
             path for summary in summaries for path in summary.skipped_files
         ),

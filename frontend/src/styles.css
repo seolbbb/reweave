@@ -224,7 +224,7 @@ p {
 
 .searchInput {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto auto;
+  grid-template-columns: 22px minmax(0, 1fr) auto auto auto;
   gap: 8px;
   align-items: center;
   min-height: 48px;
@@ -248,7 +248,7 @@ p {
   font-size: 15px;
 }
 
-.searchInput > button:not(.searchSubmit) {
+.searchInput > button:not(.searchSubmit):not(.askSubmit) {
   display: grid;
   width: 32px;
   height: 32px;
@@ -265,11 +265,30 @@ p {
   align-items: center;
   gap: 7px;
   border: 0;
-  border-radius: 0 6px 6px 0;
+  border-radius: 0;
   padding: 0 20px;
   background: #175a9f;
   color: #fff;
   font-weight: 750;
+}
+
+.askSubmit {
+  display: inline-flex;
+  height: 48px;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 0 6px 6px 0;
+  padding: 0 20px;
+  background: #142d46;
+  color: #fff;
+  font-weight: 750;
+}
+
+.searchSubmit:disabled,
+.askSubmit:disabled {
+  cursor: progress;
+  opacity: 0.65;
 }
 
 .filterRow {
@@ -277,6 +296,39 @@ p {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.modePicker {
+  display: inline-flex;
+  min-height: 34px;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #d7dde5;
+  border-radius: 6px;
+  padding: 0 4px 0 10px;
+  background: #fff;
+}
+
+.modePicker span {
+  color: #677586;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.modePicker select {
+  width: auto;
+  min-height: 30px;
+  border: 0;
+  padding: 3px 24px 3px 4px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.filterChip.smartReady {
+  border-color: #bbd9c7;
+  background: #f0f8f3;
+  color: #286643;
 }
 
 .filterChip {
@@ -339,6 +391,69 @@ select {
   min-height: 0;
   overflow: auto;
   background: #fff;
+}
+
+.searchContent {
+  min-height: 0;
+  overflow: auto;
+  background: #f7f9fb;
+}
+
+.searchContent .resultList {
+  overflow: visible;
+}
+
+.archiveAnswer {
+  margin: 20px 44px;
+  border: 1px solid #ced9e4;
+  border-radius: 9px;
+  padding: 25px 28px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(31, 54, 77, 0.06);
+}
+
+.archiveAnswer.progressAnswer {
+  padding-bottom: 20px;
+}
+
+.answerHeading {
+  display: flex;
+  gap: 13px;
+  align-items: flex-start;
+}
+
+.answerHeading > div {
+  min-width: 0;
+}
+
+.answerHeading h2 {
+  margin-top: 4px;
+  color: #17212b;
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.answerHeading p {
+  margin-top: 5px;
+  color: #728091;
+  font-size: 11px;
+}
+
+.answerIcon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 7px;
+  background: #e9f1f8;
+  color: #185a9e;
+}
+
+.answerDocument {
+  margin-top: 23px;
+  border-top: 1px solid #e4e9ee;
+  padding-top: 22px;
 }
 
 .resultRow {
@@ -1418,6 +1533,64 @@ select {
   padding-bottom: 17px;
 }
 
+.smartSearchDetails {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(360px, 1.2fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.smartSearchDetails > div > strong {
+  color: #17212b;
+  font-size: 14px;
+}
+
+.smartSearchDetails > div > p {
+  max-width: 560px;
+  margin-top: 7px;
+  color: #687687;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.smartSearchDetails dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.smartSearchDetails dl > div {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #e0e5ea;
+  border-radius: 7px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.smartSearchDetails dt {
+  color: #728091;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.smartSearchDetails dd {
+  margin: 0;
+  color: #1d2a38;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.smartProgress {
+  border-radius: 7px;
+  padding: 14px;
+  background: #f3f7fb;
+  color: #405064;
+  font-size: 12px;
+}
+
 .connectedBadge {
   display: inline-flex;
   gap: 5px;
@@ -1693,14 +1866,24 @@ select {
   }
 
   .searchInput {
-    grid-template-columns: 20px minmax(0, 1fr) auto;
+    grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  }
+
+  .searchSubmit,
+  .askSubmit {
+    grid-column: span 2;
+    width: calc(100% + 15px);
+    margin-left: -30px;
+    border-radius: 0;
+  }
+
+  .askSubmit {
+    margin-left: -15px;
+    border-radius: 0 0 6px 0;
   }
 
   .searchSubmit {
-    grid-column: 1 / -1;
-    width: calc(100% + 30px);
-    margin-left: -30px;
-    border-radius: 0 0 6px 6px;
+    border-radius: 0 0 0 6px;
   }
 
   .resultRow {
@@ -1758,6 +1941,16 @@ select {
 
   .settingsSection.full {
     grid-column: auto;
+  }
+
+  .smartSearchDetails,
+  .smartSearchDetails dl {
+    grid-template-columns: 1fr;
+  }
+
+  .archiveAnswer {
+    margin: 14px 18px;
+    padding: 20px;
   }
 
   .filterPanel {

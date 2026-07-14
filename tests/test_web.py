@@ -10,6 +10,8 @@ import reweave.llm
 import reweave.llm_profiles
 import reweave.web
 from reweave.archive import ArchiveStore
+from reweave.archive_answers import ArchiveAnswer
+from reweave.semantic import SemanticStatus
 from reweave.web import create_app
 
 
@@ -42,9 +44,95 @@ def test_api_search_groups_by_conversation(tmp_path, fixtures_dir):
     assert response.status_code == 200
     data = response.json()
     assert data["results"]
+    assert data["mode_used"] == "keyword"
+    assert data["semantic_status"]["ready"] is False
     result = data["results"][0]
     assert "excerpts" in result
     assert result["id"]
+    assert result["excerpts"][0]["match_kind"]
+    assert result["excerpts"][0]["rank_score"] > 0
+
+
+def test_api_semantic_status_and_index_job(monkeypatch, tmp_path, fixtures_dir):
+    db = tmp_path / "archive.db"
+    store = ArchiveStore(db)
+    store.import_directory(fixtures_dir)
+    expected = SemanticStatus(
+        model_id="test-model",
+        model_downloaded=True,
+        indexed_chunks=12,
+        total_chunks=12,
+        total_messages=12,
+        ready=True,
+    )
+
+    def fake_build(self, *, rebuild=False, progress=None, embedder=None):
+        assert rebuild is True
+        progress("indexing", 6, 12)
+        progress("complete", 12, 12)
+        return expected
+
+    monkeypatch.setattr(reweave.web.SemanticIndex, "build", fake_build)
+    client = TestClient(create_app(db, data_dir=tmp_path / "app-data"))
+
+    status_response = client.get("/api/semantic/status")
+    response = client.post("/api/semantic/index/jobs", json={"rebuild": True})
+
+    assert status_response.status_code == 200
+    assert status_response.json()["ready"] is False
+    assert response.status_code == 202
+    job_id = response.json()["id"]
+    for _ in range(50):
+        job = client.get(f"/api/semantic/index/jobs/{job_id}").json()
+        if job["status"] == "completed":
+            break
+        sleep(0.01)
+    assert job["status"] == "completed"
+    assert job["result"]["ready"] is True
+
+
+def test_api_archive_answer_job_returns_citable_sources(monkeypatch, tmp_path, fixtures_dir):
+    db = tmp_path / "archive.db"
+    store = ArchiveStore(db)
+    store.import_directory(fixtures_dir)
+    source = store.search("Obsidian")[0]
+
+    def fake_answer(store, search_engine, **kwargs):
+        return ArchiveAnswer(
+            question=kwargs["question"],
+            markdown=(
+                f"The archive mentions Obsidian "
+                f"[{source.conversation_id}#m{source.message_index}].\n"
+            ),
+            sources=(source,),
+            mode_used="keyword",
+            language="en",
+        )
+
+    monkeypatch.setattr(reweave.web, "answer_archive", fake_answer)
+    client = TestClient(create_app(db, data_dir=tmp_path / "app-data"))
+
+    response = client.post(
+        "/api/archive-answers/jobs",
+        json={
+            "question": "What does the archive say about Obsidian?",
+            "settings": {
+                "provider": "openai",
+                "model": "fake-model",
+                "api_key": "fake-key",
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    job_id = response.json()["id"]
+    for _ in range(50):
+        job = client.get(f"/api/archive-answers/jobs/{job_id}").json()
+        if job["status"] == "completed":
+            break
+        sleep(0.01)
+    assert job["status"] == "completed"
+    assert job["result"]["sources"][0]["conversation_id"] == source.conversation_id
 
 
 def test_api_conversation_detail_preserves_messages(tmp_path, fixtures_dir):
@@ -169,9 +257,10 @@ def test_api_llm_profiles_adds_new_default_provider_without_replacing_existing(
     refreshed = restarted.get("/api/llm/profiles").json()["profiles"]
 
     assert len([profile for profile in refreshed if profile["provider"] == "openrouter"]) == 1
-    assert next(profile for profile in refreshed if profile["provider"] == "openrouter")[
-        "name"
-    ] == "My OpenRouter"
+    assert (
+        next(profile for profile in refreshed if profile["provider"] == "openrouter")["name"]
+        == "My OpenRouter"
+    )
 
 
 def test_api_llm_models_uses_provider_response_and_saved_key(monkeypatch, tmp_path):
@@ -423,7 +512,8 @@ def test_api_insight_uses_profile_key_failover(monkeypatch, tmp_path, fixtures_d
     conversation_id = store.search("Zettelkasten")[0].conversation_id
     client = TestClient(create_app(db, data_dir=tmp_path / "app-data"))
     profile = next(
-        item for item in client.get("/api/llm/profiles").json()["profiles"]
+        item
+        for item in client.get("/api/llm/profiles").json()["profiles"]
         if item["provider"] == "openai"
     )
     for label, api_key, priority in [
