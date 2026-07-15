@@ -12,11 +12,13 @@ import {
 } from "./main";
 import {
   compactMarkdownSource,
+  extractMarkdownHeadings,
   linkifyCitationReferences,
   MarkdownContent,
   parseCitationHref,
   safeMarkdownUrl
 } from "./MarkdownContent";
+import { HighlightedText, extractHighlightTerms } from "./textHighlight";
 import { Workspace } from "./Workspace";
 
 const result: SearchResult = {
@@ -105,6 +107,79 @@ describe("frontend state helpers", () => {
     );
     expect(compactMarkdownSource("complete **bold** marker")).toBe("complete **bold** marker");
     expect(compactMarkdownSource("matched **[AI]** term")).toBe("matched **\\[AI\\]** term");
+  });
+
+  it("strips leading Markdown headings from compact excerpts", () => {
+    expect(compactMarkdownSource("## Computational Imaging\n\nBody text")).toBe(
+      "Computational Imaging\n\nBody text"
+    );
+    expect(compactMarkdownSource("질문\n\n### 알고리즘")).toBe("질문\n알고리즘");
+  });
+
+  it("does not render compact excerpts with report heading elements", () => {
+    const html = renderToStaticMarkup(
+      createElement(MarkdownContent, {
+        markdown: "## Computational Imaging\n\nMatched algorithm text.",
+        compact: true
+      })
+    );
+
+    expect(html).toContain("compactMarkdown");
+    expect(html).not.toContain("<h2");
+    expect(html).toContain("Computational Imaging");
+  });
+
+  it("renders conversation Markdown safely with the conversation style path", () => {
+    const html = renderToStaticMarkup(
+      createElement(MarkdownContent, {
+        markdown: '# Computational Imaging\n\n<script>alert("bad")</script>\n\n[bad](javascript:alert(1))',
+        variant: "conversation"
+      })
+    );
+
+    expect(html).toContain("conversationMarkdown");
+    expect(html).toContain("<h1>Computational Imaging</h1>");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("javascript:");
+    expect(html).not.toContain('id="computational-imaging"');
+  });
+
+  it("highlights English and Korean search terms without injecting HTML", () => {
+    const html = renderToStaticMarkup(
+      createElement(HighlightedText, {
+        text: 'AI 한국 <script>alert("bad")</script>',
+        terms: extractHighlightTerms("한국 ai")
+      })
+    );
+
+    expect(html).toContain('<mark class="queryHighlight">AI</mark>');
+    expect(html).toContain('<mark class="queryHighlight">한국</mark>');
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("highlights compact Markdown excerpt text safely", () => {
+    const html = renderToStaticMarkup(
+      createElement(MarkdownContent, {
+        markdown: 'Matched **AI** and 한국 terms.\n\n<script>alert("bad")</script>',
+        compact: true,
+        highlightTerms: extractHighlightTerms("한국 ai")
+      })
+    );
+
+    expect(html).toContain('<mark class="queryHighlight">AI</mark>');
+    expect(html).toContain('<mark class="queryHighlight">한국</mark>');
+    expect(html).not.toContain("<script>");
+  });
+
+  it("extracts report outline items with stable matching heading ids", () => {
+    expect(
+      extractMarkdownHeadings("# Overview\n\n## 핵심 개념\n\n## Overview\n\n#### Hidden detail")
+    ).toEqual([
+      { id: "overview", level: 1, text: "Overview" },
+      { id: "핵심-개념", level: 2, text: "핵심 개념" },
+      { id: "overview-2", level: 2, text: "Overview" }
+    ]);
   });
 
   it("creates a safe Markdown download filename", () => {

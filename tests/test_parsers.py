@@ -67,6 +67,27 @@ class TestChatGPTParser:
         convs2 = parser.parse(sample_data)
         assert convs1[0].id == convs2[0].id
 
+    def test_uses_current_node_active_branch(self, parser, sample_data):
+        conversation = sample_data[0]
+        conversation["current_node"] = "msg-4"
+        conversation["mapping"]["msg-2"]["children"].append("alternate")
+        conversation["mapping"]["alternate"] = {
+            "id": "alternate",
+            "message": {
+                "id": "alternate-message",
+                "author": {"role": "assistant"},
+                "content": {"parts": ["This inactive branch must not be imported."]},
+                "create_time": 1707571050.0,
+            },
+            "parent": "msg-2",
+            "children": [],
+        }
+
+        parsed = parser.parse(sample_data)[0]
+
+        assert len(parsed.messages) == 4
+        assert all("inactive branch" not in message.content for message in parsed.messages)
+
     def test_skips_null_messages(self, parser):
         """Root nodes with message: null should be skipped."""
         data = [{
@@ -122,6 +143,8 @@ class TestClaudeParser:
         conv = convs[0]
         assert conv.title == "Obsidian Vault Setup"
         assert conv.source == "claude"
+        assert conv.source_id == "conv-abc-123"
+        assert conv.messages[0].source_id == "msg-001"
         assert len(conv.messages) == 4
 
     def test_role_mapping(self, parser, sample_data):

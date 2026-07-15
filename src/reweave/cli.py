@@ -11,8 +11,12 @@ from rich.table import Table
 
 from reweave import __version__
 from reweave.archive import ArchiveStore, export_conversation_markdown, export_search_markdown
+from reweave.archive_answers import answer_archive
 from reweave.config import Config
 from reweave.desktop import main as run_desktop
+from reweave.llm import LLMSettings
+from reweave.paths import get_app_paths
+from reweave.semantic import SearchEngine, SemanticIndex, SemanticUnavailableError
 from reweave.web import create_app
 
 app = typer.Typer(
@@ -65,7 +69,9 @@ def import_(
     console.print(f"[green]Imported archive:[/green] {db}")
     console.print(f"  Parsed conversations: {summary.parsed_conversations}")
     console.print(f"  New conversations: {summary.inserted_conversations}")
+    console.print(f"  Updated conversations: {summary.updated_conversations}")
     console.print(f"  New messages: {summary.inserted_messages}")
+    console.print(f"  Updated messages: {summary.updated_messages}")
     if summary.skipped_files:
         console.print(f"  Skipped files: {len(summary.skipped_files)}")
 
@@ -89,17 +95,30 @@ def search(
         str | None, typer.Option("--title", help="Filter by conversation title substring.")
     ] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Maximum results.")] = 20,
+    mode: Annotated[
+        str,
+        typer.Option("--mode", help="Search mode: auto, keyword, or semantic."),
+    ] = "auto",
 ) -> None:
     """Search archived conversations."""
     store = ArchiveStore(db)
-    results = store.search(
-        query=query,
-        provider=provider,
-        date_from=date_from,
-        date_to=date_to,
-        title=title,
-        limit=limit,
+    search_engine = SearchEngine(
+        store,
+        SemanticIndex(db, get_app_paths().models_dir),
     )
+    try:
+        results, mode_used = search_engine.search_messages(
+            query=query,
+            mode=mode,
+            provider=provider,
+            date_from=date_from,
+            date_to=date_to,
+            title=title,
+            limit=limit,
+        )
+    except (SemanticUnavailableError, ValueError) as exc:
+        console.print(f"[red]Search failed:[/red] {exc}")
+        raise typer.Exit(1) from exc
     if not results:
         console.print("[yellow]No results found.[/yellow]")
         return
@@ -116,7 +135,67 @@ def search(
             result.role,
             result.excerpt,
         )
+    console.print(f"[dim]Mode: {mode_used}[/dim]")
     console.print(table)
+
+
+@app.command("index")
+def index_(
+    db: Annotated[
+        Path, typer.Option("--db", help="SQLite archive database.")
+    ] = DEFAULT_CONFIG.db_path,
+    rebuild: Annotated[
+        bool, typer.Option("--rebuild", help="Rebuild all semantic vectors.")
+    ] = False,
+) -> None:
+    """Download the optional local model and build the semantic index."""
+    store = ArchiveStore(db)
+    semantic_index = SemanticIndex(store.db_path, get_app_paths().models_dir)
+
+    def progress(stage: str, completed: int, total: int) -> None:
+        if stage == "indexing":
+            console.print(f"  Indexed {completed}/{total} chunks", end="\r")
+
+    status = semantic_index.build(rebuild=rebuild, progress=progress)
+    console.print()
+    console.print(f"[green]Smart search ready:[/green] {status.indexed_chunks} indexed chunks")
+
+
+@app.command("ask")
+def ask(
+    question: Annotated[str, typer.Argument(help="Question to answer from the archive.")],
+    db: Annotated[
+        Path, typer.Option("--db", help="SQLite archive database.")
+    ] = DEFAULT_CONFIG.db_path,
+    mode: Annotated[
+        str,
+        typer.Option("--mode", help="Search mode: auto, keyword, or semantic."),
+    ] = "auto",
+) -> None:
+    """Answer a question using retrieved archive messages and cited sources."""
+    store = ArchiveStore(db)
+    semantic_index = SemanticIndex(db, get_app_paths().models_dir)
+    search_engine = SearchEngine(store, semantic_index)
+    settings = LLMSettings(
+        provider=DEFAULT_CONFIG.llm_provider,
+        model=DEFAULT_CONFIG.llm_model,
+        api_key=DEFAULT_CONFIG.llm_api_key,
+        base_url=DEFAULT_CONFIG.llm_base_url,
+        max_context_chars=DEFAULT_CONFIG.llm_max_context_chars,
+        temperature=DEFAULT_CONFIG.llm_temperature,
+    )
+    try:
+        answer = answer_archive(
+            store,
+            search_engine,
+            question=question,
+            settings=settings,
+            mode=mode,
+        )
+    except (SemanticUnavailableError, ValueError) as exc:
+        console.print(f"[red]Ask Archive failed:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(answer.markdown)
 
 
 @app.command()

@@ -23,7 +23,10 @@ from reweave.parsers.detector import detect_and_parse
 class ImportSummary:
     parsed_conversations: int = 0
     inserted_conversations: int = 0
+    updated_conversations: int = 0
     inserted_messages: int = 0
+    updated_messages: int = 0
+    invalidated_embeddings: int = 0
     skipped_files: tuple[Path, ...] = ()
 
 
@@ -36,6 +39,7 @@ class ArchivedConversation:
     updated_at: str | None
     raw_message_count: int
     source_path: str
+    source_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +50,8 @@ class ArchivedMessage:
     role: str
     content: str
     timestamp: str | None
+    source_id: str | None = None
+    content_hash: str = ""
 
 
 @dataclass(frozen=True)
@@ -58,6 +64,8 @@ class SearchResult:
     role: str
     timestamp: str | None
     excerpt: str
+    match_kind: str = "keyword"
+    rank_score: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -122,7 +130,10 @@ class ArchiveStore:
 
         parsed = 0
         inserted_conversations = 0
+        updated_conversations = 0
         inserted_messages = 0
+        updated_messages = 0
+        invalidated_embeddings = 0
         skipped_files: list[Path] = []
 
         with self._connect() as conn:
@@ -135,16 +146,20 @@ class ArchiveStore:
 
                 parsed += len(conversations)
                 for conversation in conversations:
-                    conv_inserted, msg_inserted = self._insert_conversation(
-                        conn, conversation, file_path
-                    )
-                    inserted_conversations += int(conv_inserted)
-                    inserted_messages += msg_inserted
+                    result = self._insert_conversation(conn, conversation, file_path)
+                    inserted_conversations += int(result[0])
+                    updated_conversations += int(result[1])
+                    inserted_messages += result[2]
+                    updated_messages += result[3]
+                    invalidated_embeddings += result[4]
 
         return ImportSummary(
             parsed_conversations=parsed,
             inserted_conversations=inserted_conversations,
+            updated_conversations=updated_conversations,
             inserted_messages=inserted_messages,
+            updated_messages=updated_messages,
+            invalidated_embeddings=invalidated_embeddings,
             skipped_files=tuple(skipped_files),
         )
 
@@ -177,7 +192,10 @@ class ArchiveStore:
     def _import_json_file(self, file_path: Path) -> ImportSummary:
         parsed = 0
         inserted_conversations = 0
+        updated_conversations = 0
         inserted_messages = 0
+        updated_messages = 0
+        invalidated_embeddings = 0
         skipped_files: list[Path] = []
 
         with self._connect() as conn:
@@ -188,16 +206,20 @@ class ArchiveStore:
             else:
                 parsed += len(conversations)
                 for conversation in conversations:
-                    conv_inserted, msg_inserted = self._insert_conversation(
-                        conn, conversation, file_path
-                    )
-                    inserted_conversations += int(conv_inserted)
-                    inserted_messages += msg_inserted
+                    result = self._insert_conversation(conn, conversation, file_path)
+                    inserted_conversations += int(result[0])
+                    updated_conversations += int(result[1])
+                    inserted_messages += result[2]
+                    updated_messages += result[3]
+                    invalidated_embeddings += result[4]
 
         return ImportSummary(
             parsed_conversations=parsed,
             inserted_conversations=inserted_conversations,
+            updated_conversations=updated_conversations,
             inserted_messages=inserted_messages,
+            updated_messages=updated_messages,
+            invalidated_embeddings=invalidated_embeddings,
             skipped_files=tuple(skipped_files),
         )
 
@@ -211,12 +233,91 @@ class ArchiveStore:
         title: str | None = None,
         limit: int = 20,
     ) -> list[SearchResult]:
-        """Search messages and conversation titles with optional filters."""
+        """Search exact, prefix, and substring candidates and fuse their ranks."""
         match_query = _to_fts_query(query)
         if not match_query:
             return []
+        candidate_limit = max(20, limit)
+        searches = [
+            ("messages_fts", match_query, "keyword"),
+            ("messages_fts", _to_prefix_fts_query(query), "prefix"),
+        ]
+        trigram_query = _to_trigram_fts_query(query)
+        if trigram_query:
+            searches.append(("messages_fts_trigram", trigram_query, "substring"))
+        broad_query = _to_broad_fts_query(query)
+        if broad_query:
+            searches.append(("messages_fts", broad_query, "broad"))
 
-        clauses = ["messages_fts MATCH ?"]
+        fused: dict[str, tuple[SearchResult, float, set[str]]] = {}
+        with self._connect() as conn:
+            for table, fts_query, match_kind in searches:
+                if not fts_query:
+                    continue
+                if match_kind != "keyword" and len(fused) >= limit:
+                    continue
+                rows = self._search_fts(
+                    conn,
+                    table=table,
+                    match_query=fts_query,
+                    provider=provider,
+                    date_from=date_from,
+                    date_to=date_to,
+                    title=title,
+                    limit=candidate_limit,
+                )
+                for rank, row in enumerate(rows, start=1):
+                    score = 1.0 / (60 + rank)
+                    existing = fused.get(row["message_id"])
+                    kinds = {match_kind}
+                    result = SearchResult(
+                        conversation_id=row["conversation_id"],
+                        message_id=row["message_id"],
+                        message_index=row["message_index"],
+                        source=row["source"],
+                        title=row["title"],
+                        role=row["role"],
+                        timestamp=row["timestamp"],
+                        excerpt=_clean_snippet(row["excerpt"]),
+                        match_kind=match_kind,
+                        rank_score=score,
+                    )
+                    if existing is not None:
+                        existing_result, existing_score, existing_kinds = existing
+                        fused[row["message_id"]] = (
+                            existing_result if "keyword" in existing_kinds else result,
+                            existing_score + score,
+                            existing_kinds | kinds,
+                        )
+                    else:
+                        fused[row["message_id"]] = (result, score, kinds)
+
+        ranked: list[SearchResult] = []
+        for result, score, kinds in fused.values():
+            ranked.append(
+                SearchResult(
+                    **{
+                        **result.__dict__,
+                        "match_kind": "keyword" if "keyword" in kinds else "+".join(sorted(kinds)),
+                        "rank_score": score,
+                    }
+                )
+            )
+        return sorted(ranked, key=lambda item: item.rank_score, reverse=True)[: max(1, limit)]
+
+    @staticmethod
+    def _search_fts(
+        conn: sqlite3.Connection,
+        *,
+        table: str,
+        match_query: str,
+        provider: str | None,
+        date_from: str | None,
+        date_to: str | None,
+        title: str | None,
+        limit: int,
+    ) -> list[sqlite3.Row]:
+        clauses = [f"{table} MATCH ?"]
         params: list[object] = [match_query]
         if provider:
             clauses.append("c.source = ?")
@@ -230,9 +331,9 @@ class ArchiveStore:
         if title:
             clauses.append("c.title LIKE ?")
             params.append(f"%{title}%")
-
         params.append(max(1, limit))
-        sql = f"""
+        return conn.execute(
+            f"""
             SELECT
                 f.conversation_id,
                 f.message_id,
@@ -241,30 +342,15 @@ class ArchiveStore:
                 c.title,
                 f.role,
                 f.timestamp,
-                snippet(messages_fts, 6, '[', ']', '...', 24) AS excerpt
-            FROM messages_fts f
+                snippet({table}, 6, '[', ']', '...', 24) AS excerpt
+            FROM {table} f
             JOIN conversations c ON c.id = f.conversation_id
-            WHERE {' AND '.join(clauses)}
-            ORDER BY bm25(messages_fts)
+            WHERE {" AND ".join(clauses)}
+            ORDER BY bm25({table})
             LIMIT ?
-        """
-
-        with self._connect() as conn:
-            rows = conn.execute(sql, params).fetchall()
-
-        return [
-            SearchResult(
-                conversation_id=row["conversation_id"],
-                message_id=row["message_id"],
-                message_index=row["message_index"],
-                source=row["source"],
-                title=row["title"],
-                role=row["role"],
-                timestamp=row["timestamp"],
-                excerpt=_clean_snippet(row["excerpt"]),
-            )
-            for row in rows
-        ]
+            """,
+            params,
+        ).fetchall()
 
     def search_conversations(
         self,
@@ -317,7 +403,8 @@ class ArchiveStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id, source, title, created_at, updated_at, raw_message_count, source_path
+                SELECT id, source_id, source, title, created_at, updated_at,
+                       raw_message_count, source_path
                 FROM conversations
                 WHERE id = ?
                 """,
@@ -328,6 +415,7 @@ class ArchiveStore:
             return None
         return ArchivedConversation(
             id=row["id"],
+            source_id=row["source_id"],
             source=row["source"],
             title=row["title"],
             created_at=row["created_at"],
@@ -341,7 +429,8 @@ class ArchiveStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, conversation_id, message_index, role, content, timestamp
+                SELECT id, source_id, conversation_id, message_index, role, content,
+                       content_hash, timestamp
                 FROM messages
                 WHERE conversation_id = ?
                 ORDER BY message_index
@@ -352,10 +441,12 @@ class ArchiveStore:
         return [
             ArchivedMessage(
                 id=row["id"],
+                source_id=row["source_id"],
                 conversation_id=row["conversation_id"],
                 index=row["message_index"],
                 role=row["role"],
                 content=row["content"],
+                content_hash=row["content_hash"],
                 timestamp=row["timestamp"],
             )
             for row in rows
@@ -482,66 +573,232 @@ class ArchiveStore:
         conn: sqlite3.Connection,
         conversation: NormalizedConversation,
         source_path: Path,
-    ) -> tuple[bool, int]:
-        result = conn.execute(
-            """
-            INSERT OR IGNORE INTO conversations (
-                id, source, title, created_at, updated_at, raw_message_count, source_path
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                conversation.id,
-                conversation.source,
-                conversation.title,
-                conversation.created_at,
-                conversation.updated_at,
-                conversation.raw_message_count,
-                str(source_path),
-            ),
+    ) -> tuple[bool, bool, int, int, int]:
+        existing = None
+        if conversation.source_id:
+            existing = conn.execute(
+                "SELECT * FROM conversations WHERE source = ? AND source_id = ?",
+                (conversation.source, conversation.source_id),
+            ).fetchone()
+        if existing is None:
+            existing = conn.execute(
+                "SELECT * FROM conversations WHERE id = ?",
+                (conversation.id,),
+            ).fetchone()
+        if existing is None:
+            existing = conn.execute(
+                """
+                SELECT * FROM conversations
+                WHERE source = ? AND created_at = ?
+                ORDER BY rowid
+                LIMIT 1
+                """,
+                (conversation.source, conversation.created_at),
+            ).fetchone()
+
+        inserted_conversation = existing is None
+        updated_conversation = False
+        archive_id = conversation.id if existing is None else existing["id"]
+        values = (
+            conversation.source_id,
+            conversation.source,
+            conversation.title,
+            conversation.created_at,
+            conversation.updated_at,
+            conversation.raw_message_count,
+            str(source_path),
         )
-        inserted_conversation = result.rowcount == 1
+        if existing is None:
+            conn.execute(
+                """
+                INSERT INTO conversations (
+                    id, source_id, source, title, created_at, updated_at,
+                    raw_message_count, source_path
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (archive_id, *values),
+            )
+        else:
+            old_values = (
+                existing["source_id"],
+                existing["source"],
+                existing["title"],
+                existing["created_at"],
+                existing["updated_at"],
+                existing["raw_message_count"],
+                existing["source_path"],
+            )
+            updated_conversation = old_values != values
+            conn.execute(
+                """
+                UPDATE conversations
+                SET source_id = ?, source = ?, title = ?, created_at = ?, updated_at = ?,
+                    raw_message_count = ?, source_path = ?
+                WHERE id = ?
+                """,
+                (*values, archive_id),
+            )
+            if existing["title"] != conversation.title:
+                conn.execute(
+                    "UPDATE messages_fts SET title = ? WHERE conversation_id = ?",
+                    (conversation.title, archive_id),
+                )
+                conn.execute(
+                    "UPDATE messages_fts_trigram SET title = ? WHERE conversation_id = ?",
+                    (conversation.title, archive_id),
+                )
 
         inserted_messages = 0
+        updated_messages = 0
+        invalidated_embeddings = 0
         for index, message in enumerate(conversation.messages):
-            message_id = f"{conversation.id}:{index}"
-            result = conn.execute(
-                """
-                INSERT OR IGNORE INTO messages (
-                    id, conversation_id, message_index, role, content, timestamp
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    message_id,
-                    conversation.id,
-                    index,
-                    message.role,
-                    message.content,
-                    message.timestamp,
-                ),
+            existing_message = None
+            if message.source_id:
+                existing_message = conn.execute(
+                    """
+                    SELECT * FROM messages
+                    WHERE conversation_id = ? AND source_id = ?
+                    """,
+                    (archive_id, message.source_id),
+                ).fetchone()
+            if existing_message is None:
+                existing_message = conn.execute(
+                    """
+                    SELECT * FROM messages
+                    WHERE conversation_id = ? AND message_index = ?
+                    """,
+                    (archive_id, index),
+                ).fetchone()
+
+            message_id = (
+                existing_message["id"] if existing_message is not None else f"{archive_id}:{index}"
             )
-            if result.rowcount == 1:
-                inserted_messages += 1
+            content_hash = _message_content_hash(
+                message.role,
+                message.content,
+                message.timestamp,
+            )
+            if existing_message is None:
                 conn.execute(
                     """
-                    INSERT INTO messages_fts (
-                        message_id, conversation_id, message_index, role, timestamp, title, content
+                    INSERT INTO messages (
+                        id, source_id, conversation_id, message_index, role, content,
+                        content_hash, timestamp
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         message_id,
-                        conversation.id,
+                        message.source_id,
+                        archive_id,
                         index,
                         message.role,
-                        message.timestamp,
-                        conversation.title,
                         message.content,
+                        content_hash,
+                        message.timestamp,
                     ),
                 )
+                inserted_messages += 1
+                self._insert_fts_message(
+                    conn,
+                    message_id=message_id,
+                    conversation_id=archive_id,
+                    message_index=index,
+                    role=message.role,
+                    timestamp=message.timestamp,
+                    title=conversation.title,
+                    content=message.content,
+                )
+                continue
 
-        return inserted_conversation, inserted_messages
+            changed = (
+                existing_message["source_id"] != message.source_id
+                or existing_message["message_index"] != index
+                or existing_message["content_hash"] != content_hash
+            )
+            if not changed:
+                continue
+            conn.execute(
+                """
+                UPDATE messages
+                SET source_id = ?, message_index = ?, role = ?, content = ?,
+                    content_hash = ?, timestamp = ?
+                WHERE id = ?
+                """,
+                (
+                    message.source_id,
+                    index,
+                    message.role,
+                    message.content,
+                    content_hash,
+                    message.timestamp,
+                    message_id,
+                ),
+            )
+            updated_messages += 1
+            invalidated_embeddings += conn.execute(
+                "DELETE FROM chunk_embeddings WHERE chunk_id IN "
+                "(SELECT id FROM search_chunks WHERE message_id = ?)",
+                (message_id,),
+            ).rowcount
+            conn.execute("DELETE FROM search_chunks WHERE message_id = ?", (message_id,))
+            self._delete_fts_message(conn, message_id)
+            self._insert_fts_message(
+                conn,
+                message_id=message_id,
+                conversation_id=archive_id,
+                message_index=index,
+                role=message.role,
+                timestamp=message.timestamp,
+                title=conversation.title,
+                content=message.content,
+            )
+
+        return (
+            inserted_conversation,
+            updated_conversation,
+            inserted_messages,
+            updated_messages,
+            invalidated_embeddings,
+        )
+
+    @staticmethod
+    def _delete_fts_message(conn: sqlite3.Connection, message_id: str) -> None:
+        conn.execute("DELETE FROM messages_fts WHERE message_id = ?", (message_id,))
+        conn.execute("DELETE FROM messages_fts_trigram WHERE message_id = ?", (message_id,))
+
+    @staticmethod
+    def _insert_fts_message(
+        conn: sqlite3.Connection,
+        *,
+        message_id: str,
+        conversation_id: str,
+        message_index: int,
+        role: str,
+        timestamp: str | None,
+        title: str,
+        content: str,
+    ) -> None:
+        values = (
+            message_id,
+            conversation_id,
+            message_index,
+            role,
+            timestamp,
+            title,
+            content,
+        )
+        for table in ("messages_fts", "messages_fts_trigram"):
+            conn.execute(
+                f"""
+                INSERT INTO {table} (
+                    message_id, conversation_id, message_index, role, timestamp, title, content
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                values,
+            )
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
@@ -551,6 +808,7 @@ class ArchiveStore:
 
                 CREATE TABLE IF NOT EXISTS conversations (
                     id TEXT PRIMARY KEY,
+                    source_id TEXT,
                     source TEXT NOT NULL,
                     title TEXT NOT NULL,
                     created_at TEXT NOT NULL,
@@ -561,10 +819,12 @@ class ArchiveStore:
 
                 CREATE TABLE IF NOT EXISTS messages (
                     id TEXT PRIMARY KEY,
+                    source_id TEXT,
                     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
                     message_index INTEGER NOT NULL,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
+                    content_hash TEXT NOT NULL DEFAULT '',
                     timestamp TEXT,
                     UNIQUE(conversation_id, message_index)
                 );
@@ -577,6 +837,17 @@ class ArchiveStore:
                     timestamp UNINDEXED,
                     title,
                     content
+                );
+
+                CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts_trigram USING fts5(
+                    message_id UNINDEXED,
+                    conversation_id UNINDEXED,
+                    message_index UNINDEXED,
+                    role UNINDEXED,
+                    timestamp UNINDEXED,
+                    title,
+                    content,
+                    tokenize='trigram'
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_messages_conversation
@@ -598,8 +869,87 @@ class ArchiveStore:
 
                 CREATE INDEX IF NOT EXISTS idx_insight_reports_created
                     ON insight_reports(created_at);
+
+                CREATE TABLE IF NOT EXISTS schema_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS search_chunks (
+                    id TEXT PRIMARY KEY,
+                    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+                    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                    message_index INTEGER NOT NULL,
+                    chunk_index INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    UNIQUE(message_id, chunk_index)
+                );
+
+                CREATE TABLE IF NOT EXISTS chunk_embeddings (
+                    chunk_id TEXT PRIMARY KEY REFERENCES search_chunks(id) ON DELETE CASCADE,
+                    model_id TEXT NOT NULL,
+                    dimensions INTEGER NOT NULL,
+                    embedding BLOB NOT NULL
+                );
                 """
             )
+            self._ensure_column(conn, "conversations", "source_id", "TEXT")
+            self._ensure_column(conn, "messages", "source_id", "TEXT")
+            self._ensure_column(
+                conn,
+                "messages",
+                "content_hash",
+                "TEXT NOT NULL DEFAULT ''",
+            )
+            conn.executescript(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_source_id
+                    ON conversations(source, source_id) WHERE source_id IS NOT NULL;
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_source_id
+                    ON messages(conversation_id, source_id) WHERE source_id IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_search_chunks_conversation
+                    ON search_chunks(conversation_id, message_index);
+                INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('schema_version', '2');
+                """
+            )
+            stale_hashes = conn.execute(
+                "SELECT id, role, content, timestamp FROM messages WHERE content_hash = ''"
+            ).fetchall()
+            for row in stale_hashes:
+                conn.execute(
+                    "UPDATE messages SET content_hash = ? WHERE id = ?",
+                    (
+                        _message_content_hash(row["role"], row["content"], row["timestamp"]),
+                        row["id"],
+                    ),
+                )
+            trigram_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM messages_fts_trigram"
+            ).fetchone()["count"]
+            if trigram_count == 0:
+                conn.execute(
+                    """
+                    INSERT INTO messages_fts_trigram (
+                        message_id, conversation_id, message_index, role, timestamp, title, content
+                    )
+                    SELECT m.id, m.conversation_id, m.message_index, m.role, m.timestamp,
+                           c.title, m.content
+                    FROM messages m
+                    JOIN conversations c ON c.id = m.conversation_id
+                    """
+                )
+
+    @staticmethod
+    def _ensure_column(
+        conn: sqlite3.Connection,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -697,8 +1047,51 @@ def export_search_markdown(
 
 
 def _to_fts_query(query: str) -> str:
-    tokens = re.findall(r"[^\s\"']+", query, flags=re.UNICODE)
-    return " ".join(f'"{token}"' for token in tokens)
+    return " ".join(f'"{_escape_fts_term(term)}"' for term in _query_terms(query))
+
+
+def _to_prefix_fts_query(query: str) -> str:
+    parts = []
+    for term, quoted in _query_parts(query):
+        escaped = _escape_fts_term(term)
+        parts.append(f'"{escaped}"' if quoted else f'"{escaped}"*')
+    return " ".join(parts)
+
+
+def _to_broad_fts_query(query: str) -> str:
+    terms = _query_terms(query)
+    if len(terms) < 2:
+        return ""
+    return " OR ".join(f'"{_escape_fts_term(term)}"' for term in terms)
+
+
+def _to_trigram_fts_query(query: str) -> str:
+    terms = [term for term in _query_terms(query) if len(term) >= 3]
+    return " ".join(f'"{_escape_fts_term(term)}"' for term in terms)
+
+
+def _query_terms(query: str) -> list[str]:
+    return [term for term, _ in _query_parts(query)]
+
+
+def _query_parts(query: str) -> list[tuple[str, bool]]:
+    parts: list[tuple[str, bool]] = []
+    pattern = re.compile(r'"([^\"]+)"|\'([^\']+)\'|([^\s\"\']+)', flags=re.UNICODE)
+    for match in pattern.finditer(query.strip()):
+        quoted_value = match.group(1) or match.group(2)
+        value = quoted_value or match.group(3)
+        if value:
+            parts.append((value, quoted_value is not None))
+    return parts
+
+
+def _escape_fts_term(term: str) -> str:
+    return term.replace('"', '""')
+
+
+def _message_content_hash(role: str, content: str, timestamp: str | None) -> str:
+    value = f"{role}\0{timestamp or ''}\0{content}"
+    return sha256(value.encode("utf-8")).hexdigest()
 
 
 def _clean_snippet(snippet: str) -> str:

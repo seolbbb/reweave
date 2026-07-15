@@ -45,12 +45,13 @@ class ChatGPTParser:
         created_at = self._unix_to_iso(create_time) if create_time else ""
         updated_at = self._unix_to_iso(update_time) if update_time else None
 
-        # DFS traversal of the tree to linearize messages
-        messages = self._linearize_mapping(mapping)
+        messages = self._linearize_mapping(mapping, raw.get("current_node"))
 
-        conv_id = self._make_id("chatgpt", title, created_at)
+        source_id = str(raw.get("id") or raw.get("conversation_id") or "") or None
+        conv_id = self._make_id("chatgpt", source_id or created_at)
         return NormalizedConversation(
             id=conv_id,
+            source_id=source_id,
             title=title,
             source="chatgpt",
             created_at=created_at,
@@ -60,8 +61,32 @@ class ChatGPTParser:
             metadata={"source_path": source_path},
         )
 
-    def _linearize_mapping(self, mapping: dict[str, Any]) -> list[NormalizedMessage]:
-        """DFS traversal from root node through children to produce linear message list."""
+    def _linearize_mapping(
+        self,
+        mapping: dict[str, Any],
+        current_node: str | None = None,
+    ) -> list[NormalizedMessage]:
+        """Return the active branch, preferring ChatGPT's explicit current node."""
+        if current_node and current_node in mapping:
+            path: list[str] = []
+            seen: set[str] = set()
+            node_id: str | None = current_node
+            while node_id and node_id in mapping and node_id not in seen:
+                seen.add(node_id)
+                path.append(node_id)
+                node_id = mapping[node_id].get("parent")
+
+            messages: list[NormalizedMessage] = []
+            for active_node_id in reversed(path):
+                node = mapping[active_node_id]
+                msg_data = node.get("message")
+                if msg_data is None:
+                    continue
+                normalized = self._extract_message(msg_data, active_node_id)
+                if normalized is not None:
+                    messages.append(normalized)
+            return messages
+
         # Find root node (parent is None or "")
         root_id = None
         for node_id, node in mapping.items():
@@ -86,7 +111,7 @@ class ChatGPTParser:
 
         msg_data = node.get("message")
         if msg_data is not None:
-            normalized = self._extract_message(msg_data)
+            normalized = self._extract_message(msg_data, node_id)
             if normalized is not None:
                 messages.append(normalized)
 
@@ -96,7 +121,11 @@ class ChatGPTParser:
             # Follow the last child (most recent branch in ChatGPT exports)
             self._dfs(mapping, children[-1], messages)
 
-    def _extract_message(self, msg: dict[str, Any]) -> NormalizedMessage | None:
+    def _extract_message(
+        self,
+        msg: dict[str, Any],
+        node_id: str | None = None,
+    ) -> NormalizedMessage | None:
         author_role = msg.get("author", {}).get("role", "")
         if author_role not in ("user", "assistant", "system", "tool"):
             return None
@@ -115,6 +144,7 @@ class ChatGPTParser:
             role=author_role,
             content=text,
             timestamp=timestamp,
+            source_id=str(msg.get("id") or node_id or "") or None,
         )
 
     @staticmethod
@@ -138,6 +168,6 @@ class ChatGPTParser:
         return datetime.fromtimestamp(ts, tz=UTC).isoformat()
 
     @staticmethod
-    def _make_id(source: str, title: str, created_at: str) -> str:
-        raw = f"{source}:{title}:{created_at}"
+    def _make_id(source: str, stable_source_value: str) -> str:
+        raw = f"{source}:{stable_source_value}"
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
