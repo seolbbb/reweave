@@ -19,6 +19,7 @@ import {
   safeMarkdownUrl
 } from "./MarkdownContent";
 import { HighlightedText, extractHighlightTerms } from "./textHighlight";
+import { OnboardingWizard } from "./ArchiveManagement";
 import { Workspace } from "./Workspace";
 
 const result: SearchResult = {
@@ -191,9 +192,26 @@ describe("frontend state helpers", () => {
 
     expect(html).toContain("Search your archive");
     expect(html).toContain("Sources for insight");
+    expect(html).toContain("Library");
     expect(html).toContain("Reports");
     expect(html).toContain("Import");
     expect(html).toContain("Settings");
     expect(html).not.toContain("Report outline");
+  });
+
+  it("renders a first-run wizard with local privacy and export guidance", () => {
+    const html = renderToStaticMarkup(
+      createElement(OnboardingWizard, {
+        open: true,
+        busy: false,
+        onImport: async () => null,
+        onFinish: () => undefined,
+        onDismiss: () => undefined
+      })
+    );
+
+    expect(html).toContain("Bring your AI conversations home");
+    expect(html).toContain("Local by default");
+    expect(html).toContain("Back up, restore, or permanently delete your data");
   });
 });

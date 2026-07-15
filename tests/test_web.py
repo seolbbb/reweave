@@ -151,6 +151,64 @@ def test_api_conversation_detail_preserves_messages(tmp_path, fixtures_dir):
     assert data["messages"][0]["timestamp"] is not None
 
 
+def test_api_library_browses_without_search_query(tmp_path, fixtures_dir):
+    db = tmp_path / "archive.db"
+    ArchiveStore(db).import_directory(fixtures_dir)
+    client = TestClient(create_app(db))
+
+    response = client.get(
+        "/api/library", params={"source": "claude", "sort": "messages", "limit": 1}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 2
+    assert len(data["results"]) == 1
+    assert data["results"][0]["source"] == "claude"
+    assert data["results"][0]["preview"]
+
+
+def test_api_deletes_conversation_and_entire_source(tmp_path, fixtures_dir):
+    db = tmp_path / "archive.db"
+    store = ArchiveStore(db)
+    store.import_directory(fixtures_dir)
+    conversation_id = store.search_conversations("Obsidian")[0].id
+    client = TestClient(create_app(db))
+
+    one = client.delete(f"/api/conversations/{conversation_id}")
+    source = client.delete("/api/archive/sources/chatgpt")
+
+    assert one.status_code == 200
+    assert one.json()["conversations"] == 1
+    assert source.status_code == 200
+    assert source.json()["conversations"] == 2
+    remaining = client.get("/api/library").json()
+    assert remaining["total"] == 1
+    assert remaining["results"][0]["source"] == "claude"
+
+
+def test_api_backup_and_restore_round_trip(tmp_path, fixtures_dir):
+    db = tmp_path / "archive.db"
+    ArchiveStore(db).import_directory(fixtures_dir)
+    data_dir = tmp_path / "app-data"
+    client = TestClient(create_app(db, data_dir=data_dir))
+    backup_response = client.get("/api/archive/backup")
+    conversation_id = client.get("/api/library").json()["results"][0]["id"]
+    client.delete(f"/api/conversations/{conversation_id}")
+
+    restore_response = client.post(
+        "/api/archive/restore",
+        files={"file": ("reweave.sqlite3", backup_response.content, "application/vnd.sqlite3")},
+    )
+
+    assert backup_response.status_code == 200
+    assert "attachment" in backup_response.headers["content-disposition"]
+    assert restore_response.status_code == 200
+    assert restore_response.json()["conversations"] == 4
+    assert client.get("/api/library").json()["total"] == 4
+    assert list((data_dir / "backups").glob("reweave-before-restore-*.sqlite3"))
+
+
 def test_api_import(tmp_path, fixtures_dir):
     db = tmp_path / "archive.db"
     client = TestClient(create_app(db))
@@ -199,6 +257,7 @@ def test_api_import_upload_json(tmp_path, chatgpt_sample_path):
     data = response.json()
     assert data["inserted_conversations"] == 2
     assert (tmp_path / "app-data" / "imports").exists()
+    assert not list((tmp_path / "app-data" / "imports").iterdir())
 
 
 def test_api_import_upload_rejects_bad_extension(tmp_path):

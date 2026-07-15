@@ -12,12 +12,13 @@ from uuid import uuid4
 
 import httpx
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr
 
 from reweave.archive import ArchiveStore, ImportSummary
 from reweave.archive_answers import answer_archive
+from reweave.archive_management import ArchiveManager
 from reweave.insights import generate_insight_report
 from reweave.llm import (
     LLMSettings,
@@ -42,6 +43,7 @@ from reweave.paths import get_app_paths
 from reweave.semantic import SearchEngine, SemanticIndex, SemanticUnavailableError
 
 UPLOAD_FILES = File(...)
+UPLOAD_BACKUP = File(...)
 
 
 class ImportRequest(BaseModel):
@@ -119,6 +121,7 @@ def create_app(
     """Create the FastAPI app."""
     app = FastAPI(title="Reweave")
     store = ArchiveStore(db_path)
+    archive_manager = ArchiveManager(db_path)
     app_paths = get_app_paths(data_dir)
     profile_store = LLMProfileStore(app_paths.llm_profiles_path)
     ensure_default_profiles(profile_store)
@@ -329,6 +332,35 @@ def create_app(
             ]
         }
 
+    @app.get("/api/library")
+    def library(
+        source: str | None = None,
+        title: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        sort: str = "newest",
+        offset: int = 0,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        try:
+            page = archive_manager.list_conversations(
+                source=source,
+                title=title,
+                date_from=date_from,
+                date_to=date_to,
+                sort=sort,
+                offset=offset,
+                limit=limit,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "results": [result.__dict__ for result in page.results],
+            "total": page.total,
+            "offset": page.offset,
+            "limit": page.limit,
+        }
+
     @app.get("/api/search")
     def search(
         q: str,
@@ -447,13 +479,57 @@ def create_app(
             "messages": [message.__dict__ for message in messages],
         }
 
+    @app.delete("/api/conversations/{conversation_id}")
+    def delete_conversation(conversation_id: str) -> dict[str, int]:
+        try:
+            summary = archive_manager.delete_conversation(conversation_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return summary.__dict__
+
+    @app.delete("/api/archive/sources/{source}")
+    def delete_archive_source(source: str) -> dict[str, int]:
+        try:
+            summary = archive_manager.delete_source(source)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return summary.__dict__
+
+    @app.get("/api/archive/backup")
+    def backup_archive() -> StreamingResponse:
+        stamp = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+        filename = f"reweave-backup-{stamp}.sqlite3"
+        temporary_path = app_paths.data_dir / "backup-downloads" / f"{uuid4().hex}.sqlite3"
+        archive_manager.backup_to(temporary_path)
+        return StreamingResponse(
+            _stream_file_and_remove(temporary_path),
+            media_type="application/vnd.sqlite3",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.post("/api/archive/restore")
+    def restore_archive(file: UploadFile = UPLOAD_BACKUP) -> dict[str, Any]:
+        filename = _safe_upload_name(file.filename)
+        if Path(filename).suffix.lower() not in {".db", ".sqlite", ".sqlite3"}:
+            raise HTTPException(status_code=400, detail="Choose a Reweave SQLite backup file.")
+        temporary_path = app_paths.imports_dir / f"restore-{uuid4().hex}-{filename}"
+        with open(temporary_path, "wb") as destination:
+            shutil.copyfileobj(file.file, destination)
+        try:
+            summary = archive_manager.restore_from(
+                temporary_path,
+                safety_backup_dir=app_paths.data_dir / "backups",
+            )
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        return summary.__dict__
+
     @app.post("/api/import")
     def import_directory(request: ImportRequest) -> dict[str, Any]:
         try:
-            summary = store.import_path(
-                Path(request.input_dir),
-                extraction_root=app_paths.extracted_dir,
-            )
+            summary = store.import_path(Path(request.input_dir))
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _import_summary_to_dict(summary)
@@ -461,10 +537,7 @@ def create_app(
     @app.post("/api/import/path")
     def import_path(request: ImportPathRequest) -> dict[str, Any]:
         try:
-            summary = store.import_path(
-                Path(request.path),
-                extraction_root=app_paths.extracted_dir,
-            )
+            summary = store.import_path(Path(request.path))
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _import_summary_to_dict(summary)
@@ -481,11 +554,11 @@ def create_app(
             with open(target_path, "wb") as destination:
                 shutil.copyfileobj(upload.file, destination)
             try:
-                summaries.append(
-                    store.import_path(target_path, extraction_root=app_paths.extracted_dir)
-                )
+                summaries.append(store.import_path(target_path))
             except (OSError, ValueError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+            finally:
+                target_path.unlink(missing_ok=True)
 
         return _import_summary_to_dict(_merge_import_summaries(summaries))
 
@@ -849,6 +922,15 @@ def _safe_upload_name(filename: str | None) -> str:
     name = Path(filename or "upload").name
     sanitized = "".join(char if char.isalnum() or char in "._-" else "_" for char in name)
     return sanitized or "upload"
+
+
+def _stream_file_and_remove(path: Path):
+    try:
+        with open(path, "rb") as file:
+            while chunk := file.read(1024 * 1024):
+                yield chunk
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def _resolve_llm_settings(
