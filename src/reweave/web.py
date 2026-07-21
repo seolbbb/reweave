@@ -25,6 +25,7 @@ from reweave.context_extraction import (
     extract_context_from_conversation,
 )
 from reweave.context_library import ContextItem, ContextLibraryStore, ConversationBrief
+from reweave.conversation_capture import ConversationCapture
 from reweave.insights import generate_insight_report
 from reweave.llm import (
     LLMSettings,
@@ -844,6 +845,23 @@ def create_app(
                 target_path.unlink(missing_ok=True)
 
         return _import_summary_to_dict(_merge_import_summaries(summaries))
+
+    @app.post("/api/capture/conversations")
+    def capture_conversation(request: ConversationCapture) -> dict[str, Any]:
+        try:
+            summary = store.capture_conversation(request.to_normalized())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "conversation_id": summary.conversation_id,
+            "provider": request.provider,
+            "external_id": request.external_id,
+            "outcome": summary.outcome,
+            "message_count": len(request.messages),
+            "inserted_messages": summary.inserted_messages,
+            "updated_messages": summary.updated_messages,
+            "invalidated_embeddings": summary.invalidated_embeddings,
+        }
 
     @app.get("/api/llm/profiles")
     def list_llm_profiles() -> dict[str, Any]:
