@@ -54,25 +54,32 @@ Tasks:
   - ChatGPT and Claude extension prototypes support explicit whole-chat Save and user-requested Context use.
   - Unsaved-chat reminders are non-blocking and automatic analysis is durable across restart.
   - Required automated checks, manual flows, production frontend build, Windows executable build, and packaged-app smoke test pass.
-- Verification evidence: In progress. The TASK-001 persistence, extraction, backend API, and
-  Context frontend slices passed 127 Python tests, 22 frontend tests, Ruff, TypeScript, the
-  production frontend build, fresh clean PyInstaller builds, isolated populated browser checks,
-  and packaged startup/schema smokes. The latest browser checks covered Home and Explorer at
-  desktop and 375 pixels, and the latest packaged smoke confirmed healthy Context routes and
-  the new frontend bundle. Phase exit evidence is not yet available.
+- Verification evidence: In progress. TASK-001 is complete after its persistence, extraction,
+  backend API, Context frontend, and source-evidence navigation slices passed 127 Python tests,
+  23 frontend tests, Ruff, TypeScript, production frontend builds, fresh clean PyInstaller
+  builds, isolated populated browser checks, and packaged startup/schema smokes. The latest
+  browser checks covered live, deleted-source, and load-failure evidence paths at desktop and
+  375 pixels; the packaged smoke confirmed healthy Context routes and the new frontend bundle.
+  Phase exit evidence is not yet available.
 
 Tasks:
 
-- [ ] TASK-001: Implement durable Conversation Brief and Context Item persistence, automatic extraction from one archived conversation, a minimal Context Home and Explorer view, and source-evidence navigation.
-  - Progress: Durable Brief and Context Item persistence, source snapshots, scopes, versions,
+- [x] TASK-001: Implement durable Conversation Brief and Context Item persistence, automatic extraction from one archived conversation, a minimal Context Home and Explorer view, and source-evidence navigation.
+  - Completion: Durable Brief and Context Item persistence, source snapshots, scopes, versions,
     links, deletion survival, restart durability, and app-startup schema initialization are
     integrated. Source-grounded automatic extraction, versioned purpose prompts, conservative
     normalization, idempotent reuse, source-change reanalysis, and interrupted retry are
     integrated. Non-blocking analysis jobs and durable Brief and Item read APIs are integrated.
     The minimal Context Home and Explorer now render the same linked model with responsive,
-    accessible loading, empty, scoped browsing, and item-detail states. Source-evidence
-    navigation is the next execution slice.
+    accessible loading, empty, scoped browsing, and item-detail states. Live evidence opens the
+    exact supporting message, while removed sources and load failures retain compact evidence.
 - [ ] TASK-002: Implement the ChatGPT and Claude whole-conversation Save to Reweave extension flow with idempotent update and non-blocking save reminders.
+  - First bounded slice: Implement the provider-neutral local capture payload, persistence,
+    and app endpoint for complete ordered ChatGPT and Claude conversations. Acceptance requires
+    immediate no-key local persistence, stable provider/external identity, idempotent repeated
+    saves, validation without partial writes, and restart-readable source data. Verify with
+    focused model/store/API tests for both providers, the full required checks, strict document
+    validation, a clean Windows executable build, and an isolated packaged-endpoint smoke.
 - [ ] TASK-003: Implement the user-requested Use Reweave flow using the current chat and drafted request, with explicit context insertion and on-request refresh.
 - [ ] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
 

@@ -27,7 +27,10 @@ import {
   buildContextScopeGroups,
   contextBriefEntries,
   contextHomeItems,
+  ContextItemDetail,
   ContextWorkspace,
+  evidenceOpenTarget,
+  type ContextEvidence,
   type ContextItem
 } from "./ContextWorkspace";
 
@@ -242,7 +245,10 @@ describe("frontend state helpers", () => {
 
   it("renders Context Home and Explorer controls before local data loads", () => {
     const html = renderToStaticMarkup(
-      createElement(ContextWorkspace, { onOpenLibrary: () => undefined })
+      createElement(ContextWorkspace, {
+        onOpenLibrary: () => undefined,
+        onOpenEvidence: async () => true
+      })
     );
 
     expect(html).toContain('role="tablist"');
@@ -312,6 +318,69 @@ describe("frontend state helpers", () => {
       text: "Use one linked model for Home and Explorer.",
       sourceTitle: "Reweave planning"
     }]);
+  });
+
+  it("opens live Context evidence while keeping removed-source snapshots readable", () => {
+    const availableEvidence: ContextEvidence = {
+      id: "evidence-live",
+      source_conversation_id: "conversation-1",
+      source_message_id: "message-3",
+      source_record_id: "conversation-1",
+      source_external_id: "external-1",
+      source_message_record_id: "message-3",
+      source_provider: "chatgpt",
+      source_title: "Reweave planning",
+      source_message_index: 3,
+      source_role: "user",
+      source_timestamp: null,
+      excerpt: "Use one linked model for every Context view.",
+      relationship: "supports",
+      source_available: true,
+      created_at: "2026-07-21T00:00:00Z"
+    };
+    const retainedEvidence: ContextEvidence = {
+      ...availableEvidence,
+      id: "evidence-retained",
+      source_conversation_id: null,
+      source_message_id: null,
+      source_available: false,
+      excerpt: "Keep a compact explanation after the source is removed."
+    };
+
+    expect(evidenceOpenTarget(availableEvidence)).toEqual({
+      conversationId: "conversation-1",
+      messageIndex: 3
+    });
+    expect(evidenceOpenTarget(retainedEvidence)).toBeNull();
+
+    const html = renderToStaticMarkup(
+      createElement(ContextItemDetail, {
+        item: {
+          id: "context-evidence",
+          canonical_text: "Context stays linked to inspectable evidence.",
+          item_type: "insight",
+          epistemic_kind: "observed",
+          confidence: 0.96,
+          sensitivity: "normal",
+          status: "active",
+          current_version: 1,
+          created_at: "2026-07-21T00:00:00Z",
+          updated_at: "2026-07-21T00:00:00Z",
+          last_confirmed_at: null,
+          stale_at: null,
+          scopes: [],
+          evidence: [availableEvidence, retainedEvidence],
+          versions: [],
+          links: []
+        },
+        onOpenEvidence: async () => true
+      })
+    );
+
+    expect(html).toContain("Open source message #3");
+    expect(html).toContain("Original conversation unavailable");
+    expect(html).toContain("Compact evidence is retained on this device");
+    expect(html).toContain('aria-label="Open source message 3 in Reweave planning"');
   });
 
   it("renders a first-run wizard with local privacy and export guidance", () => {

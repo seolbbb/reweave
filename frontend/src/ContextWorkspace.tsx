@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleHelp,
   Compass,
+  ExternalLink,
   FolderTree,
   History,
   Home,
@@ -13,6 +14,7 @@ import {
   Lightbulb,
   Link2,
   ListTodo,
+  Loader2,
   LockKeyhole,
   Quote,
   RefreshCw,
@@ -116,6 +118,11 @@ export type ContextBriefEntry = {
   sourceTitle: string;
 };
 
+export type EvidenceOpenTarget = {
+  conversationId: string;
+  messageIndex: number;
+};
+
 const homeSections: HomeSection[] = [
   {
     key: "insights",
@@ -211,7 +218,28 @@ export function contextBriefEntries(briefs: ContextBrief[], sectionKey: string) 
   return entries;
 }
 
-export function ContextWorkspace({ onOpenLibrary }: { onOpenLibrary: () => void }) {
+export function evidenceOpenTarget(evidence: ContextEvidence): EvidenceOpenTarget | null {
+  if (
+    !evidence.source_available ||
+    !evidence.source_conversation_id ||
+    !Number.isInteger(evidence.source_message_index) ||
+    evidence.source_message_index < 0
+  ) {
+    return null;
+  }
+  return {
+    conversationId: evidence.source_conversation_id,
+    messageIndex: evidence.source_message_index
+  };
+}
+
+export function ContextWorkspace({
+  onOpenLibrary,
+  onOpenEvidence
+}: {
+  onOpenLibrary: () => void;
+  onOpenEvidence: (conversationId: string, messageIndex: number) => Promise<boolean>;
+}) {
   const [view, setView] = useState<"home" | "explorer">("home");
   const [briefs, setBriefs] = useState<ContextBrief[]>([]);
   const [items, setItems] = useState<ContextItem[]>([]);
@@ -329,6 +357,7 @@ export function ContextWorkspace({ onOpenLibrary }: { onOpenLibrary: () => void 
           selectedItem={selectedItem}
           onSelectGroup={selectGroup}
           onSelectItem={(item) => setSelectedItemId(item.id)}
+          onOpenEvidence={onOpenEvidence}
         />
       )}
     </section>
@@ -442,13 +471,15 @@ function ContextExplorer({
   selectedGroup,
   selectedItem,
   onSelectGroup,
-  onSelectItem
+  onSelectItem,
+  onOpenEvidence
 }: {
   groups: ContextScopeGroup[];
   selectedGroup: ContextScopeGroup;
   selectedItem: ContextItem | null;
   onSelectGroup: (group: ContextScopeGroup) => void;
   onSelectItem: (item: ContextItem) => void;
+  onOpenEvidence: (conversationId: string, messageIndex: number) => Promise<boolean>;
 }) {
   return (
     <div className="contextExplorer" role="tabpanel">
@@ -511,7 +542,13 @@ function ContextExplorer({
       </section>
 
       <aside className="contextDetailPane" aria-label="Selected Context Item">
-        {selectedItem ? <ContextItemDetail item={selectedItem} /> : (
+        {selectedItem ? (
+          <ContextItemDetail
+            item={selectedItem}
+            onOpenEvidence={onOpenEvidence}
+            key={selectedItem.id}
+          />
+        ) : (
           <div className="explorerEmpty">
             <Compass size={24} />
             <h3>Select an item</h3>
@@ -523,8 +560,32 @@ function ContextExplorer({
   );
 }
 
-function ContextItemDetail({ item }: { item: ContextItem }) {
-  const evidence = item.evidence[0];
+export function ContextItemDetail({
+  item,
+  onOpenEvidence
+}: {
+  item: ContextItem;
+  onOpenEvidence: (conversationId: string, messageIndex: number) => Promise<boolean>;
+}) {
+  const [openingEvidenceId, setOpeningEvidenceId] = useState<string | null>(null);
+  const [openError, setOpenError] = useState("");
+
+  async function openEvidence(evidence: ContextEvidence) {
+    const target = evidenceOpenTarget(evidence);
+    if (!target) return;
+    setOpeningEvidenceId(evidence.id);
+    setOpenError("");
+    try {
+      const opened = await onOpenEvidence(target.conversationId, target.messageIndex);
+      if (opened) return;
+      setOpenError("The original conversation could not be opened. Its compact evidence remains available here.");
+    } catch {
+      setOpenError("The original conversation could not be opened. Its compact evidence remains available here.");
+    } finally {
+      setOpeningEvidenceId(null);
+    }
+  }
+
   return (
     <article className="contextDetail">
       <header>
@@ -553,17 +614,48 @@ function ContextItemDetail({ item }: { item: ContextItem }) {
       </section>
       <section>
         <h3><Quote size={15} /> Source evidence</h3>
-        {evidence ? (
-          <figure className="contextEvidence">
-            <blockquote>{evidence.excerpt}</blockquote>
-            <figcaption>
-              <BookMarked size={14} />
-              <span>{evidence.source_title}</span>
-              <b>{evidence.source_available ? "Source available" : "Snapshot retained"}</b>
-            </figcaption>
-          </figure>
+        {item.evidence.length > 0 ? (
+          <div className="contextEvidenceList">
+            {item.evidence.map((evidence) => {
+              const target = evidenceOpenTarget(evidence);
+              const opening = openingEvidenceId === evidence.id;
+              return (
+                <figure className="contextEvidence" key={evidence.id}>
+                  <blockquote>{evidence.excerpt}</blockquote>
+                  <figcaption>
+                    <BookMarked size={14} />
+                    <span>{evidence.source_title}</span>
+                    <b className={target ? "available" : "retained"}>
+                      {target ? "Source available" : "Snapshot retained"}
+                    </b>
+                  </figcaption>
+                  {target ? (
+                    <button
+                      className="contextEvidenceAction"
+                      type="button"
+                      onClick={() => void openEvidence(evidence)}
+                      disabled={openingEvidenceId !== null}
+                      aria-label={`Open source message ${target.messageIndex} in ${evidence.source_title}`}
+                    >
+                      {opening ? <Loader2 className="spin" size={16} /> : <ExternalLink size={16} />}
+                      {opening ? "Opening source…" : `Open source message #${target.messageIndex}`}
+                      {!opening && <ChevronRight size={15} />}
+                    </button>
+                  ) : (
+                    <div className="contextEvidenceFallback">
+                      <BookMarked size={16} />
+                      <span>
+                        <strong>Original conversation unavailable</strong>
+                        <small>Compact evidence is retained on this device.</small>
+                      </span>
+                    </div>
+                  )}
+                </figure>
+              );
+            })}
+          </div>
         ) : <p className="contextDetailMuted">No compact evidence is available.</p>}
-        <p className="contextEvidenceNote">Opening the exact source conversation is part of the next delivery slice.</p>
+        {openError && <p className="contextEvidenceError" role="alert">{openError}</p>}
       </section>
       <section>
         <h3><History size={15} /> History & links</h3>
