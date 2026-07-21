@@ -29,8 +29,10 @@ def test_extension_reads_provider_pages_only_in_the_explicit_save_handler():
 
     assert 'const NATIVE_HOST = "com.reweave.bridge"' in background
     assert 'type: "ping"' in background
-    assert 'message?.type === "reweave:save-chatgpt"' in background
-    assert 'files: ["chatgpt-adapter.js"]' in background
+    assert 'message?.type === "reweave:save-conversation"' in background
+    assert 'adapter: "chatgpt-adapter.js"' in background
+    assert 'adapter: "claude-adapter.js"' in background
+    assert "files: [provider.adapter]" in background
     assert "fetch(" not in background
     assert "querySelector" not in background
     assert "chrome.tabs" not in popup

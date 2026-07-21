@@ -72,7 +72,11 @@ Tasks:
   actionable popup outcomes after 151 Python tests, 28 frontend tests, Ruff, JavaScript and
   TypeScript checks, a production frontend build, a clean dual-executable build, Chrome for
   Testing and installed Edge Save scenarios, and packaged created/unchanged/invalid evidence
-  passed.
+  passed. The fourth TASK-002 slice added the same explicit whole-conversation Save path for
+  Claude with provider-aware routing and fail-closed DOM normalization after 151 Python tests,
+  34 frontend tests, Ruff, JavaScript and TypeScript checks, a production frontend build, a clean
+  dual-executable build, Chrome for Testing and installed Edge created/unchanged/changed-DOM
+  scenarios, and packaged invalid-capture atomicity passed.
 
 Tasks:
 
@@ -101,11 +105,16 @@ Tasks:
     bounded native forwarding, stable capture identity, and popup states cover created, updated,
     unchanged, unsupported, logged-out, changed-DOM, incomplete, unavailable, oversized, and
     invalid outcomes without partial persistence.
-  - Next bounded slice: Implement the explicit Claude whole-conversation Save action through the
-    same action-triggered and Native Messaging boundaries. Reuse provider-neutral capture and
-    result handling, keep the ChatGPT path unchanged, and verify fixture, permission, full-gate,
-    clean executable, Chrome/Edge, and packaged Save scenarios. Reminders remain a later TASK-002
-    slice.
+  - Fourth bounded slice complete: Provider-aware routing injects the Claude adapter only after
+    the explicit Save action. The adapter validates supported Claude conversation UUIDs, current
+    stable DOM markers, signed-in state, complete alternating turns, unique identities, and
+    bounded normalized content, while the shared popup and native boundary preserve ChatGPT
+    behavior and production permission minimization.
+  - Next bounded slice: Implement the non-blocking unsaved-conversation reminder after an
+    explicit successful Save. Use only an action-triggered, page-lifetime observer and minimum
+    ephemeral baseline/dismissal state; preserve no-read-before-action behavior, fail closed on
+    navigation or uncertain DOM state, and verify ChatGPT and Claude reminder, dismissal, Save,
+    unavailable-app, permission, full-gate, clean executable, Chrome/Edge, and packaged scenarios.
 - [ ] TASK-003: Implement the user-requested Use Reweave flow using the current chat and drafted request, with explicit context insertion and on-request refresh.
 - [ ] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
 
