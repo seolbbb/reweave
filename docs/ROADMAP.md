@@ -55,10 +55,10 @@ Tasks:
   - Unsaved-chat reminders are non-blocking and automatic analysis is durable across restart.
   - Required automated checks, manual flows, production frontend build, Windows executable build, and packaged-app smoke test pass.
 - Verification evidence: In progress. The TASK-001 persistence and extraction slices passed
-  124 Python tests, 19 frontend tests, Ruff, TypeScript, the production frontend build, fresh
-  clean PyInstaller builds, and isolated packaged startup/schema smokes. The latest extraction
-  smoke reported Context schema v3 with no foreign-key violations. Phase exit evidence is not
-  yet available.
+  127 Python tests, 19 frontend tests, Ruff, TypeScript, the production frontend build, fresh
+  clean PyInstaller builds, and isolated packaged startup/schema smokes after backend API
+  exposure. The latest packaged smoke confirmed healthy Context routes, schema v3, and no
+  foreign-key violations. Phase exit evidence is not yet available.
 
 Tasks:
 
@@ -67,7 +67,9 @@ Tasks:
     links, deletion survival, restart durability, and app-startup schema initialization are
     integrated. Source-grounded automatic extraction, versioned purpose prompts, conservative
     normalization, idempotent reuse, source-change reanalysis, and interrupted retry are
-    implemented in the latest verified slice. Backend API exposure is the next execution slice.
+    integrated. Non-blocking analysis jobs and durable Brief and Item read APIs are implemented
+    in the latest verified slice. A minimal Context Home and Explorer frontend is the next
+    execution slice.
 - [ ] TASK-002: Implement the ChatGPT and Claude whole-conversation Save to Reweave extension flow with idempotent update and non-blocking save reminders.
 - [ ] TASK-003: Implement the user-requested Use Reweave flow using the current chat and drafted request, with explicit context insertion and on-request refresh.
 - [ ] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
