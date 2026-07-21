@@ -6,10 +6,12 @@
 - Working language: English
 - Current phase: PHASE-001
 - State: active
-- Repository state: TASK-001 persistence and extraction are integrated through PRs 12 and 13
-  and main commit 20af8ec; the latest verified work adds the backend Context API slice.
-  Re-observe Git on every resume.
-- Current implementation identity: Local archive and search application with onboarding, archive management, optional hybrid search, cited Ask Archive, Insight Reports, and a Phase 0 Memory Audit pilot.
+- Repository state: TASK-001 persistence, extraction, and backend API slices are integrated;
+  the latest verified work adds the Context Home and Explorer frontend slice. Re-observe Git
+  on every resume.
+- Current implementation identity: Local archive and search application with a primary
+  Context Home and Explorer, onboarding, archive management, optional hybrid search, cited
+  Ask Archive, Insight Reports, and a Phase 0 Memory Audit pilot.
 - Intended product identity: Linked Context Library and explicit web-chat Context layer defined in PRODUCT_SPEC.md.
 
 ## Implemented
@@ -44,6 +46,16 @@ Current code and historical verification show:
   completed analysis.
 - Durable Context Brief and Item list/detail APIs that expose analysis metadata, scopes,
   versions, links, compact evidence snapshots, and whether the live source still exists.
+- Context is the default application surface, with Home rendering recent Conversation Briefs,
+  active projects and topics, insights and lessons, decisions, open questions, follow-up, and
+  actions from the linked Context model.
+- Explorer renders the same Context Items through Core Self, Personal, Work, Project, Topic,
+  and Destination scopes without forcing one exclusive hierarchy; multi-scope items remain
+  discoverable from every applicable space.
+- Context Item detail renders type, epistemic kind, sensitivity, confidence, status, version,
+  scopes, compact source evidence, source availability, and link/history counts.
+- Context frontend loading, empty, error, and no-items-in-scope states are explicit and the
+  Home and Explorer layouts adapt to desktop and 375-pixel mobile widths.
 
 The preceding list describes current software, not completion of the Context Library product contract.
 
@@ -54,10 +66,29 @@ The preceding list describes current software, not completion of the Context Lib
   extraction and normalization from one archived conversation.
 - The third TASK-001 slice completes backend API exposure for starting analysis and reading
   its Brief, Context Items, scopes, versions, links, and source evidence.
-- The next bounded TASK-001 execution slice is a minimal Context Home and Explorer frontend
-  over these APIs. Evidence navigation remains a later slice of the same task.
+- The fourth TASK-001 slice completes the minimal Context Home and Explorer frontend over the
+  same linked Brief and Item APIs.
+- The next bounded TASK-001 execution slice is source-evidence navigation from a Context Item
+  to the supporting conversation when available, with compact evidence as the durable fallback.
 
 ## Verification evidence
+
+### Fresh in the TASK-001 Context Home and Explorer slice
+
+- Ruff passed across the repository.
+- 127 Python tests passed with one pre-existing Starlette/httpx deprecation warning.
+- 22 frontend tests passed, including default Context navigation, accessible Home/Explorer
+  tabs, multi-scope discovery, and Brief-only section rendering.
+- TypeScript and the Vite production frontend build passed; packaged web assets were rebuilt.
+- Desktop and 375-pixel browser checks against an isolated populated Context database showed
+  Home, Explorer, scope switching, item detail, compact evidence, sensitivity, and Brief-only
+  fields with no page or console errors, no horizontal overflow, reduced-motion support, and
+  no interactive target smaller than 44 by 44 pixels.
+- A fresh clean PyInstaller build completed successfully and created
+  `dist/Reweave/Reweave.exe` (17,364,647 bytes).
+- The packaged executable remained running for an isolated 8-second smoke, returned healthy
+  HTTP, exposed the Context Item route in OpenAPI, and served a frontend bundle containing the
+  new Linked Context Library UI. The temporary databases and processes were removed.
 
 ### Fresh in the TASK-001 backend Context API slice
 
@@ -135,9 +166,9 @@ These are historical merge records and were not rerun by the current documentati
 - The accepted Product Spec replaces the historical AI Memory Control Plane and manual Memory Audit direction, but current code still exposes Memory Audit as a standalone surface.
 - The accepted product removes user-facing Ask Archive, but current code still implements and exposes it.
 - Conversation Brief and Context Item persistence, one-conversation automatic extraction,
-  and backend analysis/read APIs now exist, but durable batching/retry, Core Self behavior,
-  automatic routing, Context Home, Explorer, Knowledge Graph, correction learning, and
-  exception Review do not yet exist.
+  backend analysis/read APIs, Context Home, and Explorer now exist, but source-evidence
+  navigation, durable batching/retry, full Core Self behavior, automatic routing, Knowledge
+  Graph, correction learning, and exception Review do not yet exist.
 - A ChatGPT and Claude browser extension with explicit Save to Reweave and Use Reweave actions does not yet exist.
 - Current Insight Reports have not yet been migrated into Conversation Brief and analysis-history behavior.
 - Current archive search has not yet been reframed or connected as Sources / Evidence Search for Context.
@@ -153,9 +184,9 @@ These are historical merge records and were not rerun by the current documentati
 
 - TASK-001: Implement durable Conversation Brief and Context Item persistence, automatic extraction from one archived conversation, a minimal Context Home and Explorer view, and source-evidence navigation.
 - Current progress: Persistence is integrated, and automatic source-grounded extraction and
-  normalization plus backend analysis/read APIs are complete in the latest verified slices.
-  The next bounded execution slice is a minimal Context Home and Explorer frontend; TASK-001
-  remains incomplete until those views and evidence-navigation acceptance paths pass.
+  normalization, backend analysis/read APIs, and the minimal Context Home and Explorer are
+  complete in the latest verified slices. The next bounded execution slice is source-evidence
+  navigation; TASK-001 remains incomplete until that acceptance path passes.
 - Acceptance: From one existing imported ChatGPT or Claude conversation, analysis creates one faithful Conversation Brief and zero or more source-linked Context Items without manual classification; the data survives restart; Context Home and Explorer render it; and an evidence action opens the supporting conversation or compact evidence.
 - Verify: Add targeted Python and frontend tests for persistence, extraction normalization, restart durability, rendering, and evidence navigation; run the repository's full required checks; build current frontend assets; create dist/Reweave/Reweave.exe with the required clean PyInstaller command; and complete the packaged-app manual scenario.
 
