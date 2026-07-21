@@ -141,7 +141,7 @@ class ContextAssemblyRequest(BaseModel):
     messages: list[CurrentChatMessageRequest] = Field(default_factory=list, max_length=500)
     draft: str = Field(min_length=1, max_length=20_000)
     destination: Literal["private", "work", "client", "shared"]
-    allowed_scopes: list[AllowedContextScopeRequest] = Field(min_length=1, max_length=25)
+    allowed_scopes: list[AllowedContextScopeRequest] = Field(default_factory=list, max_length=25)
     max_context_chars: int = Field(default=6_000, ge=512, le=20_000)
 
     @field_validator("external_id", "draft")
@@ -166,6 +166,8 @@ class ContextAssemblyRequest(BaseModel):
         scope_keys = [(scope.scope_type, scope.scope_key) for scope in self.allowed_scopes]
         if len(scope_keys) != len(set(scope_keys)):
             raise ValueError("Allowed Context scopes must be unique.")
+        if not self.allowed_scopes and self.destination != "private":
+            raise ValueError("Non-private destinations require an explicit allowed Context scope.")
         destination_scope_types = {
             "private": {"core_self", "personal", "work", "project", "topic", "destination"},
             "work": {"core_self", "work", "project", "topic", "destination"},

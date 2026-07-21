@@ -20,6 +20,7 @@ from reweave.extension_bridge import (
 from reweave.native_host import (
     MAX_REQUEST_BYTES,
     check_app_availability,
+    forward_context_assembly,
     forward_conversation_capture,
     handle_native_message,
     read_native_message,
@@ -290,6 +291,96 @@ def test_native_host_reports_invalid_unavailable_and_oversized_capture_states(
             _capture_payload(), runtime_path=runtime_path, urlopen=should_not_connect
         )["reason"]
         == "capture_too_large"
+    )
+
+
+def _context_request_payload() -> dict:
+    return {
+        "provider": "chatgpt",
+        "external_id": "conversation-42",
+        "messages": [
+            {"role": "user", "content": "Continue the Reweave project."},
+            {"role": "assistant", "content": "Source provenance matters."},
+        ],
+        "draft": "Use project provenance in this draft.",
+        "destination": "private",
+        "allowed_scopes": [],
+        "max_context_chars": 6000,
+    }
+
+
+def test_native_host_forwards_context_with_token_and_returns_only_insertion(tmp_path):
+    runtime_path = tmp_path / "extension-bridge.json"
+    token = "private-runtime-token-with-enough-entropy"
+    write_runtime_descriptor(runtime_path, port=45678, token=token, pid=991)
+    insertion_text = (
+        "<reweave_context>\n"
+        "[Reweave:project-high] Keep source provenance.\n"
+        "</reweave_context>"
+    )
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url == "http://127.0.0.1:45678/api/context/assembly"
+        assert request.get_method() == "POST"
+        assert request.get_header("X-reweave-bridge-token") == token
+        assert json.loads(request.data.decode("utf-8")) == _context_request_payload()
+        assert timeout == 10.0
+        return _FakeResponse(
+            {
+                "insertion_text": insertion_text,
+                "context_chars": len(insertion_text),
+                "items": [{"item_id": "project-high", "canonical_text": "private"}],
+            }
+        )
+
+    result = handle_native_message(
+        {
+            "type": "assemble_context",
+            "protocol_version": 1,
+            "context_request": _context_request_payload(),
+        },
+        runtime_path=runtime_path,
+        urlopen=fake_urlopen,
+    )
+
+    assert result == {
+        "type": "context_result",
+        "status": "ready",
+        "reason": "context_ready",
+        "protocol_version": 1,
+        "insertion_text": insertion_text,
+        "item_count": 1,
+        "context_chars": len(insertion_text),
+    }
+    serialized = json.dumps(result)
+    assert token not in serialized
+    assert "45678" not in serialized
+    assert "Use project provenance in this draft" not in serialized
+    assert "canonical_text" not in serialized
+
+
+@pytest.mark.parametrize(
+    ("status_code", "reason"),
+    [(409, "context_unavailable"), (422, "invalid_context"), (503, "connection_rejected")],
+)
+def test_native_host_maps_context_failure_states(tmp_path, status_code, reason):
+    runtime_path = tmp_path / "extension-bridge.json"
+    write_runtime_descriptor(runtime_path, port=45678, token="a" * 43, pid=991)
+
+    def failed_response(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            status_code,
+            "failed",
+            {},
+            io.BytesIO(b"{}"),
+        )
+
+    assert (
+        forward_context_assembly(
+            _context_request_payload(), runtime_path=runtime_path, urlopen=failed_response
+        )["reason"]
+        == reason
     )
 
 

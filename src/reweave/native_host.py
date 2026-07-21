@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import struct
 import sys
 import urllib.error
@@ -18,8 +19,10 @@ from reweave.paths import get_app_paths
 MAX_REQUEST_BYTES = 64 * 1024 * 1024
 MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_CAPTURE_FORWARD_BYTES = 32 * 1024 * 1024
+MAX_CONTEXT_FORWARD_BYTES = 512 * 1024
 MAX_HTTP_RESPONSE_BYTES = 64 * 1024
 HOST_NAME = "com.reweave.bridge"
+CONTEXT_ITEM_PATTERN = re.compile(r"^\[Reweave:([A-Za-z0-9_-]+)\]\s", re.MULTILINE)
 
 
 def read_native_message(stream: BinaryIO) -> dict[str, Any]:
@@ -120,6 +123,12 @@ def handle_native_message(
             runtime_path=runtime_path,
             urlopen=urlopen,
         )
+    if message.get("type") == "assemble_context":
+        return forward_context_assembly(
+            message.get("context_request"),
+            runtime_path=runtime_path,
+            urlopen=urlopen,
+        )
     return _status("error", "unsupported_message")
 
 
@@ -187,6 +196,84 @@ def forward_conversation_capture(
     )
 
 
+def forward_context_assembly(
+    context_request: object,
+    *,
+    runtime_path: Path | None = None,
+    urlopen: Callable[..., Any] = urllib.request.urlopen,
+) -> dict[str, Any]:
+    """Forward one bounded private-use request and return insertion-only Context."""
+    if not isinstance(context_request, dict):
+        return _context_result("error", "invalid_context")
+    body = json.dumps(context_request, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if len(body) > MAX_CONTEXT_FORWARD_BYTES:
+        return _context_result("error", "context_request_too_large")
+
+    path = runtime_path or get_app_paths(ensure=False).extension_runtime_path
+    try:
+        descriptor = read_runtime_descriptor(path)
+    except ValueError:
+        return _context_result("unavailable", "app_not_running")
+    if descriptor.protocol_version != BRIDGE_PROTOCOL_VERSION:
+        return _context_result("incompatible", "protocol_mismatch")
+
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{descriptor.port}/api/context/assembly",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Reweave-Bridge-Token": descriptor.token,
+        },
+    )
+    try:
+        with urlopen(request, timeout=10.0) as response:
+            payload = _read_json_response(response)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 409:
+            return _context_result("error", "context_unavailable")
+        if exc.code in {400, 422}:
+            return _context_result("error", "invalid_context")
+        if exc.code in {403, 503}:
+            return _context_result("unavailable", "connection_rejected")
+        return _context_result("unavailable", "connection_failed")
+    except (OSError, TimeoutError, urllib.error.URLError):
+        return _context_result("unavailable", "connection_failed")
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return _context_result("incompatible", "malformed_response")
+
+    if not isinstance(payload, dict):
+        return _context_result("incompatible", "malformed_response")
+    insertion_text = payload.get("insertion_text")
+    context_chars = payload.get("context_chars")
+    items = payload.get("items")
+    if (
+        not isinstance(insertion_text, str)
+        or not insertion_text.startswith("<reweave_context>\n")
+        or not insertion_text.endswith("</reweave_context>")
+        or len(insertion_text) > 20_000
+        or context_chars != len(insertion_text)
+        or not isinstance(items, list)
+        or not items
+        or not all(
+            isinstance(item, dict) and isinstance(item.get("item_id"), str)
+            for item in items
+        )
+    ):
+        return _context_result("incompatible", "malformed_response")
+    item_ids = [item["item_id"] for item in items]
+    marker_ids = CONTEXT_ITEM_PATTERN.findall(insertion_text)
+    if len(item_ids) != len(set(item_ids)) or marker_ids != item_ids:
+        return _context_result("incompatible", "malformed_response")
+    return _context_result(
+        "ready",
+        "context_ready",
+        insertion_text=insertion_text,
+        item_count=len(items),
+        context_chars=context_chars,
+    )
+
+
 def _read_json_response(response: Any) -> Any:
     body = response.read(MAX_HTTP_RESPONSE_BYTES + 1)
     if len(body) > MAX_HTTP_RESPONSE_BYTES:
@@ -220,6 +307,29 @@ def _capture_result(
         result["outcome"] = outcome
     if message_count is not None:
         result["message_count"] = message_count
+    return result
+
+
+def _context_result(
+    status: str,
+    reason: str,
+    *,
+    insertion_text: str | None = None,
+    item_count: int | None = None,
+    context_chars: int | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "type": "context_result",
+        "status": status,
+        "reason": reason,
+        "protocol_version": BRIDGE_PROTOCOL_VERSION,
+    }
+    if insertion_text is not None:
+        result["insertion_text"] = insertion_text
+    if item_count is not None:
+        result["item_count"] = item_count
+    if context_chars is not None:
+        result["context_chars"] = context_chars
     return result
 
 

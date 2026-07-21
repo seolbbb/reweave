@@ -1,10 +1,19 @@
 # Reweave browser extension
 
 This Manifest V3 extension checks whether the local Reweave desktop app is available through
-the browser's Native Messaging boundary and supports explicit whole-conversation Save from
-ChatGPT and Claude. It has no persistent provider host permissions or content scripts. `activeTab` and
-`scripting` grant temporary access only after the user opens the extension and clicks Save;
-the popup's availability check never reads the provider page.
+the browser's Native Messaging boundary and supports explicit whole-conversation Save plus
+draft-only Context use from ChatGPT and Claude. It has no persistent provider host permissions or
+content scripts. `activeTab` and `scripting` grant temporary access only after the user opens the
+extension and clicks Save or Use Reweave; the popup's availability check never reads the provider
+page.
+
+Use Reweave reads the complete current conversation and non-empty draft only after the click. A
+supported signed-in conversation URL is treated as a private AI destination, so the local app may
+retrieve relevant normal-sensitivity Context across spaces without exposing its scope index to the
+browser. Shared, unknown, streaming, incomplete, empty, oversized, or changed pages fail closed.
+The returned bounded `<reweave_context>` block is added before the user's unchanged draft. A later
+explicit Use replaces that block instead of duplicating it, and a concurrent draft edit prevents
+insertion. Use never submits or saves the conversation and never refreshes automatically.
 
 After a successful Save, the injected adapter remains active only for that page lifetime. It observes
 structural turn and role markers rather than message text. When at least one new complete assistant
@@ -24,14 +33,14 @@ For a local unpacked test:
 3. Build the Windows package with `packaging/Reweave.spec`.
 4. Run `scripts/register_native_host.ps1 -ExtensionId <id>`.
 5. Start `dist/Reweave/Reweave.exe`, open a ChatGPT or Claude conversation, open the extension popup,
-   and choose **Save current conversation**.
+   and choose **Use Reweave context** or **Save current conversation**.
 
 On Windows, `Alt+Shift+R` opens the same action popup for keyboard-only use. Browser extension
 shortcut settings can remap or clear it.
 
 The popup reports whether the conversation was created, updated, or already unchanged. Invalid,
 incomplete, unsupported, unavailable, and oversized captures do not partially write the archive.
-If the desktop app is unavailable during a reminder Save, the prompt remains retryable and the archive
-is unchanged. Use Reweave remains later work.
+If the desktop app is unavailable during Save, reminder Save, or Use, the action remains retryable and
+the archive and draft are unchanged.
 
 Run `scripts/unregister_native_host.ps1` after a temporary development registration.
