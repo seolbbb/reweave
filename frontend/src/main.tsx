@@ -2,6 +2,8 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { Workspace } from "./Workspace";
 import "./styles.css";
+import "./polish.css";
+import "./memoryAudit.css";
 
 type Excerpt = {
   conversation_id: string;

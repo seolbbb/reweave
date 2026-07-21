@@ -13,6 +13,7 @@ class NormalizedMessage(BaseModel):
     role: Literal["user", "assistant", "system", "tool"]
     content: str
     timestamp: str | None = None  # ISO 8601
+    source_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -20,6 +21,7 @@ class NormalizedConversation(BaseModel):
     """A full conversation, normalized from ChatGPT or Claude export format."""
 
     id: str  # Deterministic hash from source + title + created_at
+    source_id: str | None = None
     title: str
     source: Literal["chatgpt", "claude"]
     created_at: str  # ISO 8601

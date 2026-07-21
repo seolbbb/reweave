@@ -25,6 +25,7 @@ import {
   Save,
   Search,
   Settings,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Trash2,
@@ -36,9 +37,12 @@ import {
   type CitationTarget,
   type MarkdownHeading
 } from "./MarkdownContent";
+import { LibraryView, OnboardingWizard } from "./ArchiveManagement";
+import { MemoryAuditView, type AuditLLMSettings } from "./MemoryAudit";
 import { HighlightedText, extractHighlightTerms } from "./textHighlight";
 
-type View = "search" | "reports" | "import" | "settings";
+type View = "library" | "audit" | "search" | "reports" | "import" | "settings";
+type SearchMode = "auto" | "keyword" | "semantic";
 
 type Excerpt = {
   conversation_id: string;
@@ -49,6 +53,8 @@ type Excerpt = {
   role: string;
   timestamp: string | null;
   excerpt: string;
+  match_kind?: string;
+  rank_score?: number;
 };
 
 type SearchResult = {
@@ -109,15 +115,47 @@ type InsightJob = {
 type ImportSummary = {
   parsed_conversations: number;
   inserted_conversations: number;
+  updated_conversations: number;
   inserted_messages: number;
+  updated_messages: number;
+  invalidated_embeddings: number;
   skipped_files: string[];
 };
 
 type AppPaths = {
   data_dir: string;
   db_path: string;
+  memory_audit_db_path: string;
   imports_dir: string;
   extracted_dir: string;
+  models_dir: string;
+};
+
+type SemanticStatus = {
+  model_id: string;
+  model_downloaded: boolean;
+  indexed_chunks: number;
+  total_chunks: number;
+  total_messages: number;
+  ready: boolean;
+};
+
+type ArchiveAnswer = {
+  question: string;
+  markdown: string;
+  mode_used: string;
+  language: "ko" | "en";
+  sources: Excerpt[];
+};
+
+type BackgroundJob<T> = {
+  id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  stage: string;
+  message: string;
+  progress: number;
+  result: T | null;
+  error: string | null;
 };
 
 type SourceFacet = {
@@ -199,6 +237,8 @@ const initialModelLoad: ModelLoadState = {
 export function Workspace() {
   const [activeView, setActiveView] = useState<View>("search");
   const [query, setQuery] = useState("");
+  const [searchMode, setSearchMode] = useState<SearchMode>("auto");
+  const [modeUsed, setModeUsed] = useState("keyword");
   const [sourceFilter, setSourceFilter] = useState("");
   const [titleFilter, setTitleFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -211,9 +251,13 @@ export function Workspace() {
   const [reports, setReports] = useState<InsightSummary[]>([]);
   const [insight, setInsight] = useState<Insight | null>(null);
   const [insightJob, setInsightJob] = useState<InsightJob | null>(null);
+  const [archiveAnswer, setArchiveAnswer] = useState<ArchiveAnswer | null>(null);
+  const [answerJob, setAnswerJob] = useState<BackgroundJob<ArchiveAnswer> | null>(null);
   const [reportSources, setReportSources] = useState<Record<string, SearchResult>>({});
   const [paths, setPaths] = useState<AppPaths | null>(null);
   const [sourceFacets, setSourceFacets] = useState<SourceFacet[]>([]);
+  const [semanticStatus, setSemanticStatus] = useState<SemanticStatus | null>(null);
+  const [semanticJob, setSemanticJob] = useState<BackgroundJob<SemanticStatus> | null>(null);
   const [profiles, setProfiles] = useState<LLMProfile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState("");
   const [model, setModel] = useState("");
@@ -230,11 +274,13 @@ export function Workspace() {
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [status, setStatus] = useState("Search your imported archive.");
   const [importStatus, setImportStatus] = useState("Drop files or choose a .zip/.json export.");
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const modelRequest = useRef(0);
 
   const selectedResults = useMemo(() => Object.values(selectedById), [selectedById]);
   const selectedIds = useMemo(() => Object.keys(selectedById), [selectedById]);
   const insightBusy = insightJob?.status === "queued" || insightJob?.status === "running";
+  const answerBusy = answerJob?.status === "queued" || answerJob?.status === "running";
   const activeProfile = useMemo(
     () => profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0],
     [profiles, activeProfileId]
@@ -249,6 +295,14 @@ export function Workspace() {
   const archiveConversationCount = sourceFacets.reduce((total, facet) => total + facet.conversations, 0);
   const archiveMessageCount = sourceFacets.reduce((total, facet) => total + facet.messages, 0);
   const modelReady = activeProfile?.connected && modelLoad.status === "success" && Boolean(model);
+  const auditLLMSettings: AuditLLMSettings | null = activeProfile && model
+    ? {
+        profile_id: activeProfile.id,
+        model,
+        max_context_chars: maxContextChars,
+        temperature
+      }
+    : null;
 
   useEffect(() => {
     void loadInitialData();
@@ -273,7 +327,22 @@ export function Workspace() {
   }, [activeProfile?.id, activeProfile?.base_url, activeProfile?.connected]);
 
   async function loadInitialData() {
-    await Promise.all([loadPaths(), loadFacets(), loadProfiles(), loadReports()]);
+    const [, conversationCount] = await Promise.all([
+      loadPaths(),
+      loadFacets(),
+      loadProfiles(),
+      loadReports(),
+      loadSemanticStatus()
+    ]);
+    if (conversationCount === 0 && !hasCompletedOnboarding()) setOnboardingOpen(true);
+  }
+
+  async function loadSemanticStatus() {
+    try {
+      setSemanticStatus(await api<SemanticStatus>("/api/semantic/status"));
+    } catch {
+      setSemanticStatus(null);
+    }
   }
 
   async function loadPaths() {
@@ -288,8 +357,10 @@ export function Workspace() {
     try {
       const data = await api<{ sources: SourceFacet[] }>("/api/facets");
       setSourceFacets(data.sources ?? []);
+      return (data.sources ?? []).reduce((total, facet) => total + facet.conversations, 0);
     } catch {
       setSourceFacets([]);
+      return null;
     }
   }
 
@@ -358,18 +429,149 @@ export function Workspace() {
     setBusy(true);
     setStatus("Searching...");
     try {
-      const params = new URLSearchParams({ q: query, limit: "40" });
+      const params = new URLSearchParams({ q: query, limit: "40", mode: searchMode });
       if (sourceFilter) params.set("provider", sourceFilter);
       if (titleFilter) params.set("title", titleFilter);
       if (dateFrom) params.set("date_from", dateFrom);
       if (dateTo) params.set("date_to", dateTo);
-      const data = await api<{ results: SearchResult[] }>(`/api/search?${params.toString()}`);
+      const data = await api<{
+        results: SearchResult[];
+        mode_used: string;
+        semantic_status: SemanticStatus;
+      }>(`/api/search?${params.toString()}`);
       setResults(data.results ?? []);
+      setModeUsed(data.mode_used);
+      setSemanticStatus(data.semantic_status);
+      setArchiveAnswer(null);
       setStatus(`${data.results?.length ?? 0} conversations found.`);
     } catch (error) {
       setStatus(messageFrom(error, "Search failed."));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function askArchive() {
+    if (!query.trim()) {
+      setStatus("Enter a question for your archive.");
+      return;
+    }
+    if (!activeProfile || !modelReady) {
+      setStatus("Connect an AI provider and choose an available model in Settings.");
+      return;
+    }
+    const queued: BackgroundJob<ArchiveAnswer> = {
+      id: "",
+      status: "queued",
+      stage: "searching",
+      message: "Searching your local archive",
+      progress: 2,
+      result: null,
+      error: null
+    };
+    setArchiveAnswer(null);
+    setAnswerJob(queued);
+    setStatus(queued.message);
+    try {
+      const job = await api<BackgroundJob<ArchiveAnswer>>("/api/archive-answers/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: query,
+          mode: searchMode,
+          provider: sourceFilter || null,
+          title: titleFilter || null,
+          date_from: dateFrom || null,
+          date_to: dateTo || null,
+          settings: {
+            profile_id: activeProfile.id,
+            model,
+            max_context_chars: maxContextChars,
+            temperature
+          }
+        })
+      });
+      setAnswerJob(job);
+      await pollAnswerJob(job.id);
+    } catch (error) {
+      const message = messageFrom(error, "Archive answer failed.");
+      setAnswerJob({ ...queued, status: "failed", stage: "failed", message, error: message });
+      setStatus(message);
+    }
+  }
+
+  async function pollAnswerJob(jobId: string) {
+    while (true) {
+      await delay(500);
+      const job = await api<BackgroundJob<ArchiveAnswer>>(`/api/archive-answers/jobs/${jobId}`);
+      setAnswerJob(job);
+      setStatus(job.message);
+      if (job.status === "completed" && job.result) {
+        setArchiveAnswer(job.result);
+        setModeUsed(job.result.mode_used);
+        setAnswerJob(null);
+        setStatus(`Answer grounded in ${job.result.sources.length} archive sources.`);
+        return;
+      }
+      if (job.status === "failed") throw new Error(job.error || "Archive answer failed.");
+    }
+  }
+
+  async function startSemanticIndex(rebuild = false) {
+    const queued: BackgroundJob<SemanticStatus> = {
+      id: "",
+      status: "queued",
+      stage: "preparing",
+      message: "Preparing the local semantic model",
+      progress: 2,
+      result: null,
+      error: null
+    };
+    setSemanticJob(queued);
+    try {
+      const job = await api<BackgroundJob<SemanticStatus>>("/api/semantic/index/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rebuild })
+      });
+      setSemanticJob(job);
+      while (true) {
+        await delay(500);
+        const update = await api<BackgroundJob<SemanticStatus>>(`/api/semantic/index/jobs/${job.id}`);
+        setSemanticJob(update);
+        if (update.status === "completed") {
+          setSemanticStatus(update.result);
+          setSemanticJob(null);
+          setStatus("Smart search is ready.");
+          return;
+        }
+        if (update.status === "failed") throw new Error(update.error || "Smart search setup failed.");
+      }
+    } catch (error) {
+      const message = messageFrom(error, "Smart search setup failed.");
+      setSemanticJob({ ...queued, status: "failed", stage: "failed", message, error: message });
+      setStatus(message);
+      await loadSemanticStatus();
+    }
+  }
+
+  async function deleteSemanticIndex() {
+    if (!window.confirm("Remove the local semantic index? The downloaded model will be kept.")) return;
+    try {
+      setSemanticStatus(await api<SemanticStatus>("/api/semantic/index", { method: "DELETE" }));
+      setStatus("Smart search index removed.");
+    } catch (error) {
+      setStatus(messageFrom(error, "Could not remove the smart search index."));
+    }
+  }
+
+  async function deleteSemanticModel() {
+    if (!window.confirm("Remove the local semantic index and downloaded model?")) return;
+    try {
+      setSemanticStatus(await api<SemanticStatus>("/api/semantic/model", { method: "DELETE" }));
+      setStatus("Smart search model and index removed.");
+    } catch (error) {
+      setStatus(messageFrom(error, "Could not remove the smart search model."));
     }
   }
 
@@ -478,9 +680,9 @@ export function Workspace() {
     }
   }
 
-  async function importFiles(files: FileList | File[]) {
+  async function importFiles(files: FileList | File[]): Promise<ImportSummary | null> {
     const fileList = Array.from(files);
-    if (!fileList.length) return;
+    if (!fileList.length) return null;
     setBusy(true);
     setImportStatus(`Importing ${fileList.length} file${fileList.length === 1 ? "" : "s"}...`);
     try {
@@ -488,9 +690,11 @@ export function Workspace() {
       fileList.forEach((file) => formData.append("files", file));
       const summary = await api<ImportSummary>("/api/import/upload", { method: "POST", body: formData });
       setImportStatus(formatImportStatus(summary));
-      await loadFacets();
+      await Promise.all([loadFacets(), loadSemanticStatus()]);
+      return summary;
     } catch (error) {
       setImportStatus(messageFrom(error, "Import failed."));
+      return null;
     } finally {
       setBusy(false);
     }
@@ -510,7 +714,7 @@ export function Workspace() {
         body: JSON.stringify({ path: importPath })
       });
       setImportStatus(formatImportStatus(summary));
-      await loadFacets();
+      await Promise.all([loadFacets(), loadSemanticStatus()]);
     } catch (error) {
       setImportStatus(messageFrom(error, "Import failed."));
     } finally {
@@ -646,6 +850,27 @@ export function Workspace() {
     if (view === "reports" && !insight && reports[0]) void openReport(reports[0].id);
   }
 
+  async function refreshArchiveData() {
+    setDetail(null);
+    setResults([]);
+    setSelectedById({});
+    setArchiveAnswer(null);
+    setInsight(null);
+    await Promise.all([loadFacets(), loadReports(), loadSemanticStatus()]);
+  }
+
+  function finishOnboarding(destination: "library" | "search") {
+    rememberOnboardingComplete();
+    setOnboardingOpen(false);
+    setActiveView(destination);
+  }
+
+  function dismissOnboarding() {
+    rememberOnboardingComplete();
+    setOnboardingOpen(false);
+    setActiveView("import");
+  }
+
   return (
     <main className="workspaceShell">
       <Navigation
@@ -654,14 +879,68 @@ export function Workspace() {
         conversationCount={archiveConversationCount}
         onNavigate={switchView}
       />
+      {activeView === "library" && (
+        <>
+          <LibraryView
+            paths={paths}
+            sourceFacets={sourceFacets}
+            onOpenConversation={(id) => void openDetail(id)}
+            onImport={() => setActiveView("import")}
+            onArchiveChanged={refreshArchiveData}
+          />
+          {detail && (
+            <div className="libraryDrawerBackdrop" role="presentation" onClick={() => setDetail(null)}>
+              <aside className="libraryDrawerPanel" onClick={(event) => event.stopPropagation()}>
+                <ConversationDrawer
+                  detail={detail}
+                  close={() => setDetail(null)}
+                  targetIndex={detailMessageIndex}
+                  label="Archived conversation"
+                />
+              </aside>
+            </div>
+          )}
+        </>
+      )}
+      {activeView === "audit" && (
+        <>
+          <MemoryAuditView
+            modelReady={Boolean(modelReady)}
+            llmSettings={auditLLMSettings}
+            onOpenEvidence={(conversationId, messageIndex) => void openDetail(conversationId, messageIndex)}
+            onOpenSettings={() => setActiveView("settings")}
+          />
+          {detail && (
+            <div className="libraryDrawerBackdrop" role="presentation" onClick={() => setDetail(null)}>
+              <aside className="libraryDrawerPanel" onClick={(event) => event.stopPropagation()}>
+                <ConversationDrawer
+                  detail={detail}
+                  close={() => setDetail(null)}
+                  targetIndex={detailMessageIndex}
+                  label="Audit evidence"
+                />
+              </aside>
+            </div>
+          )}
+        </>
+      )}
       {activeView === "search" && (
         <SearchView
           query={query}
           setQuery={setQuery}
           runSearch={runSearch}
+          askArchive={askArchive}
           busy={busy}
+          answerBusy={answerBusy}
           status={status}
           results={results}
+          searchMode={searchMode}
+          setSearchMode={setSearchMode}
+          modeUsed={modeUsed}
+          semanticStatus={semanticStatus}
+          archiveAnswer={archiveAnswer}
+          answerJob={answerJob}
+          openCitation={openCitation}
           selectedById={selectedById}
           toggleSelection={toggleSelection}
           openDetail={openDetail}
@@ -723,6 +1002,7 @@ export function Workspace() {
           busy={busy}
           importFiles={importFiles}
           importLocalPath={importLocalPath}
+          showOnboarding={() => setOnboardingOpen(true)}
         />
       )}
       {activeView === "settings" && (
@@ -753,8 +1033,20 @@ export function Workspace() {
           setTemperature={setTemperature}
           saveAdvancedSettings={saveAdvancedSettings}
           settingsBusy={settingsBusy}
+          semanticStatus={semanticStatus}
+          semanticJob={semanticJob}
+          startSemanticIndex={startSemanticIndex}
+          deleteSemanticIndex={deleteSemanticIndex}
+          deleteSemanticModel={deleteSemanticModel}
         />
       )}
+      <OnboardingWizard
+        open={onboardingOpen}
+        busy={busy}
+        onImport={importFiles}
+        onFinish={finishOnboarding}
+        onDismiss={dismissOnboarding}
+      />
     </main>
   );
 }
@@ -771,6 +1063,8 @@ function Navigation({
   onNavigate: (view: View) => void;
 }) {
   const items: Array<{ view: View; label: string; icon: React.ReactNode }> = [
+    { view: "library", label: "Library", icon: <Library size={19} /> },
+    { view: "audit", label: "Audit", icon: <ShieldCheck size={19} /> },
     { view: "search", label: "Search", icon: <Search size={19} /> },
     { view: "reports", label: "Reports", icon: <FileText size={19} /> },
     { view: "import", label: "Import", icon: <CloudUpload size={19} /> },
@@ -809,9 +1103,18 @@ type SearchViewProps = {
   query: string;
   setQuery: (value: string) => void;
   runSearch: () => void;
+  askArchive: () => void;
   busy: boolean;
+  answerBusy: boolean;
   status: string;
   results: SearchResult[];
+  searchMode: SearchMode;
+  setSearchMode: (value: SearchMode) => void;
+  modeUsed: string;
+  semanticStatus: SemanticStatus | null;
+  archiveAnswer: ArchiveAnswer | null;
+  answerJob: BackgroundJob<ArchiveAnswer> | null;
+  openCitation: (target: CitationTarget) => void;
   selectedById: Record<string, SearchResult>;
   toggleSelection: (result: SearchResult) => void;
   openDetail: (id: string, index?: number | null) => void;
@@ -853,25 +1156,50 @@ function SearchView(props: SearchViewProps) {
         </header>
         <div className="searchControls">
           <div className="searchInput">
-            <Search size={19} />
-            <input
-              aria-label="Search archive"
-              value={props.query}
-              onChange={(event) => props.setQuery(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && props.runSearch()}
-              placeholder="Search topics, phrases, or ideas"
-            />
-            {props.query && (
-              <button type="button" onClick={() => props.setQuery("")} aria-label="Clear search">
-                <X size={17} />
+            <div className="searchField">
+              <Search size={19} aria-hidden="true" />
+              <input
+                aria-label="Search archive"
+                value={props.query}
+                onChange={(event) => props.setQuery(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && props.runSearch()}
+                placeholder="Search topics, phrases, or ideas"
+              />
+              {props.query && (
+                <button type="button" onClick={() => props.setQuery("")} aria-label="Clear search">
+                  <X size={17} />
+                </button>
+              )}
+            </div>
+            <div className="searchActions">
+              <button className="searchSubmit" type="button" onClick={props.runSearch} disabled={props.busy}>
+                {props.busy ? <Loader2 className="spin" size={17} /> : <Search size={17} />}
+                Search
               </button>
-            )}
-            <button className="searchSubmit" type="button" onClick={props.runSearch} disabled={props.busy}>
-              {props.busy ? <Loader2 className="spin" size={17} /> : <Search size={17} />}
-              Search
-            </button>
+              <button
+                className="askSubmit"
+                type="button"
+                onClick={props.askArchive}
+                disabled={props.answerBusy}
+              >
+                {props.answerBusy ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
+                Ask archive
+              </button>
+            </div>
           </div>
           <div className="filterRow">
+            <label className="modePicker">
+              <span>Mode</span>
+              <select
+                aria-label="Search mode"
+                value={props.searchMode}
+                onChange={(event) => props.setSearchMode(event.target.value as SearchMode)}
+              >
+                <option value="auto">Auto</option>
+                <option value="keyword">Keyword</option>
+                <option value="semantic">Semantic</option>
+              </select>
+            </label>
             <button
               className={props.filtersOpen ? "filterChip active" : "filterChip"}
               type="button"
@@ -884,6 +1212,9 @@ function SearchView(props: SearchViewProps) {
             {(props.dateFrom || props.dateTo) && (
               <span className="filterChip static"><CalendarDays size={15} /> Date range</span>
             )}
+            <span className={props.semanticStatus?.ready ? "filterChip static smartReady" : "filterChip static"}>
+              <Sparkles size={14} /> {props.semanticStatus?.ready ? `Smart ready · ${props.modeUsed}` : "Keyword ready"}
+            </span>
             <span className="resultCount">{props.status}</span>
           </div>
           {props.filtersOpen && (
@@ -914,6 +1245,32 @@ function SearchView(props: SearchViewProps) {
             </div>
           )}
         </div>
+        <div className="searchContent">
+        {props.answerJob && (
+          <section className="archiveAnswer progressAnswer" aria-live="polite">
+            <div className="answerHeading">
+              <span className="answerIcon"><Sparkles size={19} /></span>
+              <div><span className="sectionLabel">Ask Archive</span><h2>{props.answerJob.message}</h2></div>
+            </div>
+            <div className="progressTrack"><span style={{ width: `${props.answerJob.progress}%` }} /></div>
+            <div className="progressMeta"><span>{props.answerJob.stage}</span><span>{props.answerJob.progress}%</span></div>
+          </section>
+        )}
+        {props.archiveAnswer && (
+          <article className="archiveAnswer">
+            <header className="answerHeading">
+              <span className="answerIcon"><BookOpen size={19} /></span>
+              <div>
+                <span className="sectionLabel">Archive answer · {props.archiveAnswer.mode_used}</span>
+                <h2>{props.archiveAnswer.question}</h2>
+                <p>{props.archiveAnswer.sources.length} verified source messages</p>
+              </div>
+            </header>
+            <div className="answerDocument">
+              <MarkdownContent markdown={props.archiveAnswer.markdown} onCitation={props.openCitation} />
+            </div>
+          </article>
+        )}
         <div className="resultList">
           {props.results.map((result) => (
             <article className={props.selectedById[result.id] ? "resultRow selected" : "resultRow"} key={result.id}>
@@ -952,6 +1309,7 @@ function SearchView(props: SearchViewProps) {
               <p>Matching conversations and source excerpts will appear here.</p>
             </div>
           )}
+        </div>
         </div>
       </div>
       <aside className={props.detail ? "sourceRail drawerOpen" : "sourceRail"}>
@@ -1306,7 +1664,8 @@ function ImportView({
   importStatus,
   busy,
   importFiles,
-  importLocalPath
+  importLocalPath,
+  showOnboarding
 }: {
   paths: AppPaths | null;
   sourceFacets: SourceFacet[];
@@ -1318,13 +1677,19 @@ function ImportView({
   busy: boolean;
   importFiles: (files: FileList | File[]) => void;
   importLocalPath: () => void;
+  showOnboarding: () => void;
 }) {
   return (
     <section className="singlePage">
-      <header className="pageHeader">
-        <span className="sectionLabel">Local archive</span>
-        <h1>Import conversations</h1>
-        <p>Add ChatGPT or Claude exports. Reweave keeps your searchable archive on this device.</p>
+      <header className="pageHeader importHeader">
+        <div>
+          <span className="sectionLabel">Local archive</span>
+          <h1>Import conversations</h1>
+          <p>Add ChatGPT or Claude exports. Reweave keeps your searchable archive on this device.</p>
+        </div>
+        <button className="secondaryButton" type="button" onClick={showOnboarding}>
+          <BookOpen size={16} /> Export guide
+        </button>
       </header>
       <div className="statsGrid">
         <div><Database size={20} /><span><strong>{conversationCount.toLocaleString()}</strong><small>Conversations</small></span></div>
@@ -1399,6 +1764,11 @@ type SettingsProps = {
   setTemperature: (value: number) => void;
   saveAdvancedSettings: () => void;
   settingsBusy: boolean;
+  semanticStatus: SemanticStatus | null;
+  semanticJob: BackgroundJob<SemanticStatus> | null;
+  startSemanticIndex: (rebuild?: boolean) => void;
+  deleteSemanticIndex: () => void;
+  deleteSemanticModel: () => void;
 };
 
 function SettingsView(props: SettingsProps) {
@@ -1409,7 +1779,7 @@ function SettingsView(props: SettingsProps) {
       <header className="pageHeader">
         <span className="sectionLabel">Bring your own model</span>
         <h1>AI connection</h1>
-        <p>Connect a provider only when you want Reweave to generate an insight report.</p>
+        <p>Local search stays on this device. Connect a provider only for Ask Archive or insight reports.</p>
       </header>
       <div className="settingsLayout">
         <section className="settingsSection">
@@ -1446,6 +1816,57 @@ function SettingsView(props: SettingsProps) {
             <label>Temperature<input type="number" min={0} max={2} step={0.1} value={props.temperature} onChange={(event) => props.setTemperature(Number(event.target.value))} /></label>
           </div>
         </section>
+        <section className="settingsSection full smartSearchCard">
+          <header>
+            <div>
+              <h2>Smart search</h2>
+              <p>Optional local meaning search for Korean and English. Nothing is uploaded.</p>
+            </div>
+            {props.semanticStatus?.ready && <span className="connectedBadge"><Check size={13} /> Ready</span>}
+          </header>
+          <div className="smartSearchDetails">
+            <div>
+              <strong>{props.semanticStatus?.model_downloaded ? "Multilingual model installed" : "Model not downloaded"}</strong>
+              <p>
+                Reweave downloads about 220 MB only after you enable this feature, then stores message
+                embeddings and searches them locally.
+              </p>
+            </div>
+            <dl>
+              <div><dt>Indexed chunks</dt><dd>{props.semanticStatus?.indexed_chunks.toLocaleString() ?? "0"}</dd></div>
+              <div><dt>Archive messages</dt><dd>{props.semanticStatus?.total_messages.toLocaleString() ?? "0"}</dd></div>
+              <div><dt>Model</dt><dd>Multilingual MiniLM</dd></div>
+            </dl>
+          </div>
+          {props.semanticJob && (
+            <div className="smartProgress" aria-live="polite">
+              <strong>{props.semanticJob.message}</strong>
+              <div className="progressTrack"><span style={{ width: `${props.semanticJob.progress}%` }} /></div>
+              <div className="progressMeta"><span>{props.semanticJob.stage}</span><span>{props.semanticJob.progress}%</span></div>
+            </div>
+          )}
+          <div className="buttonRow">
+            {!props.semanticStatus?.ready ? (
+              <button className="primaryButton" type="button" onClick={() => props.startSemanticIndex(false)} disabled={Boolean(props.semanticJob)}>
+                <Download size={16} /> Download model &amp; index archive
+              </button>
+            ) : (
+              <button className="secondaryButton" type="button" onClick={() => props.startSemanticIndex(true)} disabled={Boolean(props.semanticJob)}>
+                <RefreshCw size={16} /> Rebuild index
+              </button>
+            )}
+            {Boolean(props.semanticStatus?.indexed_chunks) && (
+              <button className="secondaryButton" type="button" onClick={props.deleteSemanticIndex} disabled={Boolean(props.semanticJob)}>
+                <Trash2 size={16} /> Remove index
+              </button>
+            )}
+            {props.semanticStatus?.model_downloaded && (
+              <button className="dangerButton" type="button" onClick={props.deleteSemanticModel} disabled={Boolean(props.semanticJob)}>
+                <Trash2 size={16} /> Remove model
+              </button>
+            )}
+          </div>
+        </section>
         <section className="settingsSection full">
           <header><div><h2>Advanced provider settings</h2><p>Only needed for compatible endpoints or models not returned automatically.</p></div></header>
           <div className="twoColumnFields"><label>Base URL<input value={props.baseUrlDraft} onChange={(event) => props.setBaseUrlDraft(event.target.value)} placeholder="Optional provider endpoint" /></label><label>Additional model IDs<input value={props.customModelsDraft} onChange={(event) => props.setCustomModelsDraft(event.target.value)} placeholder="Comma-separated" /></label></div>
@@ -1480,7 +1901,13 @@ function messageFrom(error: unknown, fallback: string) {
 }
 
 function formatImportStatus(summary: ImportSummary) {
-  return `Imported ${summary.inserted_conversations} new conversations and ${summary.inserted_messages} messages from ${summary.parsed_conversations} parsed conversations.${summary.skipped_files.length ? ` ${summary.skipped_files.length} files skipped.` : ""}`;
+  const updates = summary.updated_conversations || summary.updated_messages
+    ? ` Updated ${summary.updated_conversations} conversations and ${summary.updated_messages} messages.`
+    : "";
+  const invalidated = summary.invalidated_embeddings
+    ? ` ${summary.invalidated_embeddings} smart-search chunks will be refreshed.`
+    : "";
+  return `Imported ${summary.inserted_conversations} new conversations and ${summary.inserted_messages} new messages from ${summary.parsed_conversations} parsed conversations.${updates}${invalidated}${summary.skipped_files.length ? ` ${summary.skipped_files.length} files skipped.` : ""}`;
 }
 
 function formatDate(value: string) {
@@ -1515,4 +1942,20 @@ function chooseModel(current: string, saved: string, models: string[], provider:
   if (models.includes(saved)) return saved;
   const preference = provider === "anthropic" ? "sonnet" : provider === "gemini" ? "flash" : "mini";
   return models.find((item) => item.toLocaleLowerCase().includes(preference)) ?? models[0] ?? "";
+}
+
+function hasCompletedOnboarding() {
+  try {
+    return window.localStorage.getItem("reweave:onboarding-complete:v1") === "true";
+  } catch {
+    return false;
+  }
+}
+
+function rememberOnboardingComplete() {
+  try {
+    window.localStorage.setItem("reweave:onboarding-complete:v1", "true");
+  } catch {
+    // Onboarding still works when storage is unavailable in a restricted webview.
+  }
 }

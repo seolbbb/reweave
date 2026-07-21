@@ -34,6 +34,7 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+!packaging/Reweave.spec
 
 # Installer logs
 pip-log.txt
@@ -199,6 +200,7 @@ cython_debug/
 
 # Reweave checkpoints
 .reweave-checkpoints/
+.benchmark-models/
 
 # Local conversation exports and imported sample data
 data/
