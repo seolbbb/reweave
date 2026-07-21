@@ -16,11 +16,19 @@ import httpx
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from reweave.archive import ArchiveStore, ImportSummary
 from reweave.archive_answers import answer_archive
 from reweave.archive_management import ArchiveManager
+from reweave.context_assembly import (
+    AllowedScope,
+    ContextAssemblyInput,
+    ContextAssemblyResult,
+    ContextUnavailableError,
+    CurrentChatMessage,
+    assemble_context,
+)
 from reweave.context_extraction import (
     ContextExtractionResult,
     extract_context_from_conversation,
@@ -93,6 +101,83 @@ class ContextAnalysisRequest(BaseModel):
         "auto"
     )
     settings: LLMSettingsRequest
+
+
+class CurrentChatMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=50_000)
+
+    @field_validator("content")
+    @classmethod
+    def require_visible_content(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Current-chat message content cannot be blank.")
+        return value
+
+
+class AllowedContextScopeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scope_type: Literal["core_self", "personal", "work", "project", "topic", "destination"]
+    scope_key: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def normalize_scope(self) -> AllowedContextScopeRequest:
+        self.scope_key = self.scope_key.strip()
+        if self.scope_type in {"project", "topic", "destination"} and not self.scope_key:
+            raise ValueError(f"{self.scope_type} scope requires a scope key.")
+        if self.scope_type in {"core_self", "personal", "work"} and self.scope_key:
+            raise ValueError(f"{self.scope_type} scope cannot have a scope key.")
+        return self
+
+
+class ContextAssemblyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["chatgpt", "claude"]
+    external_id: str = Field(min_length=1, max_length=512)
+    messages: list[CurrentChatMessageRequest] = Field(default_factory=list, max_length=500)
+    draft: str = Field(min_length=1, max_length=20_000)
+    destination: Literal["private", "work", "client", "shared"]
+    allowed_scopes: list[AllowedContextScopeRequest] = Field(min_length=1, max_length=25)
+    max_context_chars: int = Field(default=6_000, ge=512, le=20_000)
+
+    @field_validator("external_id", "draft")
+    @classmethod
+    def normalize_required_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Current-chat identity and draft cannot be blank.")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_bounds_and_scope(self) -> ContextAssemblyRequest:
+        if sum(len(message.content) for message in self.messages) > 200_000:
+            raise ValueError("Current-chat content exceeds 200000 characters.")
+        if self.messages and any(
+            message.role != ("user" if index % 2 == 0 else "assistant")
+            for index, message in enumerate(self.messages)
+        ):
+            raise ValueError("Current-chat messages must contain complete user-assistant turns.")
+        if self.messages and self.messages[-1].role != "assistant":
+            raise ValueError("Current-chat messages must end with a complete assistant response.")
+        scope_keys = [(scope.scope_type, scope.scope_key) for scope in self.allowed_scopes]
+        if len(scope_keys) != len(set(scope_keys)):
+            raise ValueError("Allowed Context scopes must be unique.")
+        destination_scope_types = {
+            "private": {"core_self", "personal", "work", "project", "topic", "destination"},
+            "work": {"core_self", "work", "project", "topic", "destination"},
+            "client": {"core_self", "project", "topic", "destination"},
+            "shared": {"core_self", "project", "topic", "destination"},
+        }
+        if any(
+            scope.scope_type not in destination_scope_types[self.destination]
+            for scope in self.allowed_scopes
+        ):
+            raise ValueError("An allowed Context scope is unsafe for this destination.")
+        return self
 
 
 class SemanticIndexRequest(BaseModel):
@@ -890,6 +975,35 @@ def create_app(
             "protocol_version": 1,
         }
 
+    @app.post("/api/context/assembly")
+    def create_context_assembly(
+        request: ContextAssemblyRequest,
+        x_reweave_bridge_token: str | None = BRIDGE_TOKEN_HEADER,
+    ) -> dict[str, Any]:
+        require_extension_bridge_token(x_reweave_bridge_token)
+        assembly_request = ContextAssemblyInput(
+            provider=request.provider,
+            external_id=request.external_id,
+            messages=tuple(
+                CurrentChatMessage(role=message.role, content=message.content)
+                for message in request.messages
+            ),
+            draft=request.draft,
+            destination=request.destination,
+            allowed_scopes=tuple(
+                AllowedScope(scope_type=scope.scope_type, scope_key=scope.scope_key)
+                for scope in request.allowed_scopes
+            ),
+            max_context_chars=request.max_context_chars,
+        )
+        try:
+            result = assemble_context(context_library, assembly_request)
+        except ContextUnavailableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _context_assembly_result_to_dict(result)
+
     @app.get("/api/llm/profiles")
     def list_llm_profiles() -> dict[str, Any]:
         stored = profile_store.list()
@@ -1385,6 +1499,32 @@ def _conversation_search_result_to_dict(result) -> dict[str, Any]:
         "raw_message_count": result.raw_message_count,
         "match_count": result.match_count,
         "excerpts": [excerpt.__dict__ for excerpt in result.excerpts],
+    }
+
+
+def _context_assembly_result_to_dict(result: ContextAssemblyResult) -> dict[str, Any]:
+    return {
+        "insertion_text": result.insertion_text,
+        "context_chars": result.context_chars,
+        "context_budget_chars": result.context_budget_chars,
+        "truncated": result.truncated,
+        "items": [
+            {
+                "item_id": item.item_id,
+                "canonical_text": item.canonical_text,
+                "item_type": item.item_type,
+                "epistemic_kind": item.epistemic_kind,
+                "confidence": item.confidence,
+                "scopes": list(item.scopes),
+                "score": item.score,
+                "provenance": {
+                    "provider": item.source_provider,
+                    "title": item.source_title,
+                    "message_index": item.source_message_index,
+                },
+            }
+            for item in result.items
+        ],
     }
 
 
