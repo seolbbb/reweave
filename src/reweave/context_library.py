@@ -509,13 +509,18 @@ class ContextLibraryStore:
                 return None
             return self._row_to_item(conn, row)
 
-    def list_items(self, *, limit: int = 200) -> list[ContextItem]:
-        """Return current Context Items newest first."""
+    def list_items(self, *, limit: int | None = 200) -> list[ContextItem]:
+        """Return current Context Items newest first, or the full library when unbounded."""
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM context_items ORDER BY updated_at DESC, id LIMIT ?",
-                (min(max(limit, 1), 1_000),),
-            ).fetchall()
+            if limit is None:
+                rows = conn.execute(
+                    "SELECT * FROM context_items ORDER BY updated_at DESC, id"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM context_items ORDER BY updated_at DESC, id LIMIT ?",
+                    (min(max(limit, 1), 1_000),),
+                ).fetchall()
             return [self._row_to_item(conn, row) for row in rows]
 
     def revise_item(

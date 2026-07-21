@@ -121,12 +121,16 @@ Tasks:
     explicit re-Save, unavailable-app retry, navigation and startup clearing, production
     permission minimization, Chrome/Edge packaged flows, and cleanup are verified.
 - [ ] TASK-003: Implement the user-requested Use Reweave flow using the current chat and drafted request, with explicit context insertion and on-request refresh.
-  - Next bounded slice: Implement the authenticated provider-neutral Context assembly contract
-    and local endpoint for one explicit, bounded current-chat payload and non-empty draft. Filter
-    existing Context Items by allowed scope and sensitivity before deterministic ranking,
-    deduplication, and context-budget assembly; return insertion-ready text with compact item
-    provenance; persist neither the chat nor draft; and defer provider DOM insertion and refresh
-    controls to the next TASK-003 slice.
+  - First bounded slice complete: The authenticated provider-neutral Context assembly contract
+    accepts one bounded ChatGPT or Claude current-chat payload and non-empty draft, applies
+    destination-safe scope and sensitivity filtering before deterministic local ranking,
+    deduplication, and context-budget assembly, and returns insertion-ready text with compact
+    item provenance without persisting the chat or draft.
+  - Next bounded slice: Connect the Chrome and Edge extension to the assembly endpoint through
+    Native Messaging after one explicit Use Reweave action. Normalize the complete current chat
+    and draft with the existing ChatGPT and Claude adapters, conservatively derive allowed
+    destination scope, insert or on-request refresh one bounded Reweave block without duplicating
+    prior items, and do not save the conversation or refresh automatically.
 - [ ] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
 
 ### PHASE-002 — Personalization, trust, and retrieval hardening
