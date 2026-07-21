@@ -56,7 +56,7 @@ class ConversationCapture(BaseModel):
     provider: Literal["chatgpt", "claude"]
     external_id: str = Field(min_length=1, max_length=512)
     title: str = Field(min_length=1, max_length=4_000)
-    created_at: str = Field(min_length=1, max_length=64)
+    created_at: str | None = Field(default=None, max_length=64)
     updated_at: str | None = Field(default=None, max_length=64)
     messages: list[CapturedMessage] = Field(min_length=1, max_length=5_000)
 
@@ -70,7 +70,9 @@ class ConversationCapture(BaseModel):
 
     @field_validator("created_at")
     @classmethod
-    def validate_created_at(cls, value: str) -> str:
+    def validate_created_at(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _require_aware_iso_timestamp(value, "Conversation created_at")
 
     @field_validator("updated_at")
@@ -99,7 +101,7 @@ class ConversationCapture(BaseModel):
             source_id=self.external_id,
             title=self.title,
             source=self.provider,
-            created_at=self.created_at,
+            created_at=self.created_at or "",
             updated_at=self.updated_at,
             messages=[
                 NormalizedMessage(

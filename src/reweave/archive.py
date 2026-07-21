@@ -213,7 +213,12 @@ class ArchiveStore:
 
         source_path = f"capture://{conversation.source}/{conversation.id}"
         with self._connect() as conn:
-            result = self._insert_conversation(conn, conversation, source_path)
+            result = self._insert_conversation(
+                conn,
+                conversation,
+                source_path,
+                allow_timestamp_fallback=False,
+            )
             stored = conn.execute(
                 "SELECT id FROM conversations WHERE source = ? AND source_id = ?",
                 (conversation.source, conversation.source_id),
@@ -620,6 +625,8 @@ class ArchiveStore:
         conn: sqlite3.Connection,
         conversation: NormalizedConversation,
         source_path: Path | str,
+        *,
+        allow_timestamp_fallback: bool = True,
     ) -> tuple[bool, bool, int, int, int]:
         existing = None
         if conversation.source_id:
@@ -632,7 +639,7 @@ class ArchiveStore:
                 "SELECT * FROM conversations WHERE id = ?",
                 (conversation.id,),
             ).fetchone()
-        if existing is None:
+        if existing is None and allow_timestamp_fallback:
             existing = conn.execute(
                 """
                 SELECT * FROM conversations

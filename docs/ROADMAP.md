@@ -67,7 +67,12 @@ Tasks:
   Chrome/Edge scaffold, authenticated Native Messaging availability boundary, separately
   packaged host, and registration tooling after 146 Python tests, 23 frontend tests, Ruff, a
   clean dual-executable build, unpacked Chrome and Edge checks, and packaged ready/unavailable
-  scenarios passed.
+  scenarios passed. The third TASK-002 slice added action-gated ChatGPT whole-conversation Save,
+  fail-closed DOM normalization, bounded native forwarding, stable capture identity, and
+  actionable popup outcomes after 151 Python tests, 28 frontend tests, Ruff, JavaScript and
+  TypeScript checks, a production frontend build, a clean dual-executable build, Chrome for
+  Testing and installed Edge Save scenarios, and packaged created/unchanged/invalid evidence
+  passed.
 
 Tasks:
 
@@ -90,13 +95,17 @@ Tasks:
     descriptor, a separately packaged console host, and actionable ready/unavailable/incompatible
     popup states without provider page or localhost permissions. It loads unpacked in Chrome and
     Edge and passes packaged available/unavailable scenarios.
-  - Next bounded slice: Implement the explicit ChatGPT whole-conversation Save action through
-    the existing native boundary. Page reading begins only after the click, uses the smallest
-    action-triggered ChatGPT permission, normalizes one complete ordered conversation, and reports
-    created, updated, unchanged, unsupported, changed-DOM, unavailable, oversized, and invalid
-    outcomes without partial persistence. Verify with adapter fixtures, action and permission
-    tests, native-host forwarding tests, full gates, a clean executable build, and unpacked
-    Chrome/Edge plus packaged Save smokes. Claude and reminders remain later TASK-002 slices.
+  - Third bounded slice complete: The production extension uses `activeTab` plus `scripting`
+    without provider host permissions or persistent content scripts; only explicit popup or
+    browser-action invocation reads the active ChatGPT conversation. The fail-closed adapter,
+    bounded native forwarding, stable capture identity, and popup states cover created, updated,
+    unchanged, unsupported, logged-out, changed-DOM, incomplete, unavailable, oversized, and
+    invalid outcomes without partial persistence.
+  - Next bounded slice: Implement the explicit Claude whole-conversation Save action through the
+    same action-triggered and Native Messaging boundaries. Reuse provider-neutral capture and
+    result handling, keep the ChatGPT path unchanged, and verify fixture, permission, full-gate,
+    clean executable, Chrome/Edge, and packaged Save scenarios. Reminders remain a later TASK-002
+    slice.
 - [ ] TASK-003: Implement the user-requested Use Reweave flow using the current chat and drafted request, with explicit context insertion and on-request refresh.
 - [ ] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
 

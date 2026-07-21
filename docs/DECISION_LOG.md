@@ -376,3 +376,31 @@ The following entries record the current accepted product direction.
   an equally explicit and less privileged local boundary.
 - Supersedes: None
 - Superseded by: None
+
+### DEC-024 — Grant provider-page access only for an explicit browser action
+
+- Status: accepted
+- Date: 2026-07-21
+- Initiated by: Agent-owned architecture within accepted TASK-002
+- Context: Explicit Save must read the complete active provider conversation after a user action,
+  but persistent provider host permissions or always-loaded content scripts would widen the
+  browser-access boundary beyond the accepted product contract.
+- User intent/value protected: Keep browser collection legible, temporary, and initiated by the
+  user while preserving one-click Save in Chrome and Edge.
+- Intervention: None; the user delegated low-level implementation decisions, and this choice
+  implements DEC-015 and DEC-018.
+- Options considered: Persistent provider host permissions with content scripts, optional
+  per-provider host permissions, or temporary `activeTab` access with programmatic injection.
+- Decision: Use `activeTab` and `scripting` with no provider host permissions and no persistent
+  content scripts. Query the active tab and inject the provider adapter only after the popup Save
+  button or reserved browser action shortcut is invoked. Fail closed when the URL, sign-in state,
+  turn sequence, identity, content, or payload bounds cannot prove a complete conversation.
+- Consequences: Popup availability checks cannot inspect provider tabs; access ends with the
+  temporary tab grant; provider DOM changes require fixture-backed adapter updates; ChatGPT and
+  future Claude Save and Use paths share the same explicit boundary. Automated fixture harnesses
+  may need temporary test-only host permission because programmatic button activation does not
+  create a browser user gesture, but production permission tests must reject that permission.
+- Reconsider when: Browser action semantics change, enterprise policy blocks temporary injection,
+  or a first-party provider integration offers equally explicit access with fewer permissions.
+- Supersedes: None
+- Superseded by: None

@@ -3,12 +3,19 @@
   "name": "Reweave",
   "version": "0.1.0",
   "description": "Save and reuse selected AI conversations with the local Reweave app.",
-  "permissions": ["nativeMessaging"],
+  "permissions": ["nativeMessaging", "activeTab", "scripting"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
     "default_title": "Reweave",
     "default_popup": "popup.html"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "windows": "Alt+Shift+R"
+      }
+    }
   }
 }

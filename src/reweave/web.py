@@ -859,7 +859,12 @@ def create_app(
         return _import_summary_to_dict(_merge_import_summaries(summaries))
 
     @app.post("/api/capture/conversations")
-    def capture_conversation(request: ConversationCapture) -> dict[str, Any]:
+    def capture_conversation(
+        request: ConversationCapture,
+        x_reweave_bridge_token: str | None = BRIDGE_TOKEN_HEADER,
+    ) -> dict[str, Any]:
+        if extension_bridge_token is not None:
+            require_extension_bridge_token(x_reweave_bridge_token)
         try:
             summary = store.capture_conversation(request.to_normalized())
         except ValueError as exc:
