@@ -1,13 +1,17 @@
 # Reweave Product Strategy, Competitive Rationale, and Delivery Tracker
 
-> Canonical product document. Read and update this file for every repository
-> task, as required by `AGENTS.md`.
+> Historical strategy, competitive-research, and delivery snapshot.
+> It was superseded as the active product contract on 2026-07-21 by
+> `PRODUCT_SPEC.md`, `PROJECT_STATUS.md`, `ROADMAP.md`, and `DECISION_LOG.md`.
+> Preserve this file for research provenance, completed-work evidence, and the
+> original strategy history; do not use its roadmap or decision statuses as current.
 
 | Field | Value |
 |---|---|
+| Document role | Historical snapshot; not the active product contract |
 | Strategy version | 1.0 |
 | Strategy date | 2026-07-15 |
-| Last progress update | 2026-07-15 |
+| Last progress update | 2026-07-21 |
 | Product stage | Existing archive/search foundation; memory audit validation next |
 | Primary decision | Build a human-facing AI memory governance product, not another conversation search or generic cross-AI memory tool |
 
@@ -584,6 +588,9 @@ evidence.
 
 ## 16. Current Delivery Tracker
 
+> Historical tracker snapshot. Read `PROJECT_STATUS.md` and `ROADMAP.md` for
+> current state, drift, phases, tasks, and the single Next task.
+
 Update this table whenever a roadmap deliverable changes. Add specific task
 detail to the Task Work Log below.
 
@@ -603,12 +610,16 @@ cancelled, or superseded entries.
 
 | Date | Task | Roadmap link | Status | Scope and decisions | Validation evidence |
 |---|---|---|---|---|---|
+| 2026-07-21 | Migrate the canonical product record to the four-document intent system | Maintenance / Other | Complete | Preserved the implemented archive/search foundation and historical strategy while replacing the active Memory Audit direction with the approved linked Context Library contract; created separate product spec, roadmap, project status, and decision log documents; no product-code changes | Strict Full validation passed with zero errors and warnings; placeholder, language, stale-reference, scoped-diff, and git diff checks passed; fresh-context Goldfish reconstruction passed with no implementation-blocking ambiguity; no executable build applied to this documentation-only task |
 | 2026-07-21 | Integrate completed work through `dev` into `main` | Maintenance / Other | Complete | Preserved the onboarding/archive-management commit and Phase 0 memory-audit pilot as separate history; expanded and merged PR #10 into `dev` with a merge commit, then merged the verified `dev` tree into `main` with a merge commit; no new product scope | Ruff passed; 110 Python and 19 frontend tests passed; TypeScript and production frontend build passed; fresh PyInstaller build created `dist/Reweave/Reweave.exe`; 8-second executable startup smoke passed; PR #10 merged as `c3041c4`; `dev` merged and pushed to `main` as `b17db95`; `main` and `dev` tree hashes matched |
 | 2026-07-15 | Complete the Phase 0 one-person memory-audit engineering pilot | P0 | Complete | Supersedes the earlier implementation entry: added a separate local validation store, human-confirmed LLM assistance, evidence review, redacted exports, and English research materials; the first live pilot still uses a ChatGPT memory summary; P1 ledger and delivery remain out of scope | Ruff and TypeScript passed; 110 Python and 19 frontend tests passed; production frontend build passed; synthetic browser flow covered manual creation, no-evidence review, save, completion, and redacted JSON export with no browser errors; fresh PyInstaller build produced `dist/Reweave/Reweave.exe` and startup smoke passed; P0 remains In progress pending the real-user gates |
 | 2026-07-15 | Build the Phase 0 one-person memory-audit pilot | P0 | In progress | Add a separate local validation store, human-confirmed LLM assistance, evidence review, redacted exports, and English research materials; first live pilot uses a ChatGPT memory summary; P1 ledger and delivery remain out of scope | Implementation, automated tests, executable build, and pilot evidence pending |
 | 2026-07-15 | Preserve product strategy and require permanent progress tracking | Maintenance / Other | Complete | Created this canonical strategy, research, rationale, roadmap, tracker, and decision log; updated `AGENTS.md` so every future task maintains it | Documentation reviewed; no runtime files changed, so executable build was not required |
 
 ## 18. Decision Log
+
+> Historical decision snapshot. Read `DECISION_LOG.md` for current statuses and
+> the accepted decisions that supersede this direction.
 
 | ID | Date | Decision | Reason | Status / supersedes |
 |---|---|---|---|---|
