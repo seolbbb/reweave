@@ -60,7 +60,10 @@ Tasks:
   builds, isolated populated browser checks, and packaged startup/schema smokes. The latest
   browser checks covered live, deleted-source, and load-failure evidence paths at desktop and
   375 pixels; the packaged smoke confirmed healthy Context routes and the new frontend bundle.
-  Phase exit evidence is not yet available.
+  The first TASK-002 slice added and packaged the no-key local capture contract after 132 Python
+  tests, 23 frontend tests, Ruff, a clean executable build, and ChatGPT/Claude created,
+  unchanged-repeat, invalid-input, Library, and Search smoke paths passed. Phase exit evidence
+  is not yet available.
 
 Tasks:
 
@@ -74,12 +77,17 @@ Tasks:
     accessible loading, empty, scoped browsing, and item-detail states. Live evidence opens the
     exact supporting message, while removed sources and load failures retain compact evidence.
 - [ ] TASK-002: Implement the ChatGPT and Claude whole-conversation Save to Reweave extension flow with idempotent update and non-blocking save reminders.
-  - First bounded slice: Implement the provider-neutral local capture payload, persistence,
-    and app endpoint for complete ordered ChatGPT and Claude conversations. Acceptance requires
-    immediate no-key local persistence, stable provider/external identity, idempotent repeated
-    saves, validation without partial writes, and restart-readable source data. Verify with
-    focused model/store/API tests for both providers, the full required checks, strict document
-    validation, a clean Windows executable build, and an isolated packaged-endpoint smoke.
+  - First bounded slice complete: The provider-neutral local capture payload, persistence, and
+    app endpoint accept complete ordered ChatGPT and Claude conversations with immediate no-key
+    local persistence, stable provider/external identity, idempotent repeated saves, validation
+    without partial writes, restart-readable source data, and packaged endpoint evidence.
+  - Next bounded slice: Create the Manifest V3 Chrome/Edge scaffold and a secure local-app
+    connection and availability handshake before provider page access. Acceptance requires
+    intentional local-service access without opening capture to ordinary web origins, actionable
+    unavailable/conflict/malformed states, compatible Chrome and Edge manifests, and no page
+    reading or broader host permissions yet. Verify with transport and manifest tests, full
+    repository gates, strict document validation, a clean executable build, an unpacked Chromium
+    load, and packaged available/unavailable handshake smokes.
 - [ ] TASK-003: Implement the user-requested Use Reweave flow using the current chat and drafted request, with explicit context insertion and on-request refresh.
 - [ ] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
 
