@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, SecretStr
 from reweave.archive import ArchiveStore, ImportSummary
 from reweave.archive_answers import answer_archive
 from reweave.archive_management import ArchiveManager
+from reweave.context_library import ContextLibraryStore
 from reweave.insights import generate_insight_report
 from reweave.llm import (
     LLMSettings,
@@ -180,6 +181,7 @@ def create_app(
     """Create the FastAPI app."""
     app = FastAPI(title="Reweave")
     store = ArchiveStore(db_path)
+    app.state.context_library = ContextLibraryStore(db_path)
     archive_manager = ArchiveManager(db_path)
     app_paths = get_app_paths(data_dir)
     profile_store = LLMProfileStore(app_paths.llm_profiles_path)

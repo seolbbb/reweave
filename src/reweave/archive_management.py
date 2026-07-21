@@ -144,7 +144,10 @@ class ArchiveManager:
         )
 
     def delete_conversation(self, conversation_id: str) -> DeletionSummary:
-        """Delete one conversation and every locally derived artifact that cites it."""
+        """Delete one source conversation and source-bound legacy artifacts.
+
+        Context Items and Briefs retain compact evidence snapshots and nullable source links.
+        """
         with closing(self._connect()) as conn, conn:
             exists = conn.execute(
                 "SELECT 1 FROM conversations WHERE id = ?", (conversation_id,)

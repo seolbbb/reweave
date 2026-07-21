@@ -1,0 +1,163 @@
+# Reweave Roadmap
+
+## Document control
+
+- Status: active
+- Last reviewed: 2026-07-21
+- Working language: English
+
+## Status vocabulary
+
+- planned: accepted future work that has not started.
+- active: the one phase currently being executed.
+- blocked: accepted work that cannot progress until a named condition changes.
+- done: exit criteria and verification evidence are complete.
+- superseded: intentionally replaced by a linked phase or decision.
+
+## Current phase
+
+- Phase: PHASE-001
+- Outcome: Deliver the first end-to-end stored-conversation-to-web-chat Context loop on the accepted canonical contract.
+
+## Phases
+
+### PHASE-000 — Canonical document convergence
+
+- Status: done
+- Outcome: Future agents can reconstruct the accepted Context Library product, current implementation drift, protected user values, delivery order, and exactly one Next task from repository documents alone.
+- Dependencies: Clean integrated main branch at 034a206 and an approved Full interview plan.
+- Entry criteria: The decision-completion interview has terminal states for every material route and the user has approved document materialization.
+- Exit criteria: The four-document record is complete, routed, validated, and independently reconstructable.
+  - PRODUCT_SPEC.md, ROADMAP.md, PROJECT_STATUS.md, and DECISION_LOG.md contain no placeholders.
+  - AGENTS.md routes work to the four documents without changing protected PR, language, or executable-build rules.
+  - The historical combined strategy is visibly superseded as the active contract but preserved as research and delivery history.
+  - Strict Full validation, diff checks, and Goldfish reconstruction pass.
+- Verification evidence: Strict Full validation passed with zero errors and warnings; placeholder, language, stale-canonical-reference, and scoped-diff checks passed; git diff --check passed with line-ending notices only; a fresh-context Goldfish agent reconstructed the intent, protected decisions, current implementation drift, constraints, and single Next task with no implementation-blocking ambiguity. No executable build applied because TASK-000 changed documentation only.
+
+Tasks:
+
+- [x] TASK-000: Materialize, validate, and independently reconstruct the approved four-document product record.
+
+### PHASE-001 — First end-to-end Context loop
+
+- Status: active
+- Outcome: One stored conversation can become a durable Conversation Brief and linked Context Items, appear in Context Home and Explorer, retain source evidence, and participate in an explicit Save and Use web-chat loop.
+- Dependencies: PHASE-000.
+- Entry criteria: PHASE-000 is done and current implementation has been re-observed against the accepted product contract.
+  - The canonical documents pass strict Full validation.
+  - Current archive, search, import, frontend, API, and packaging behavior has been re-observed.
+  - TASK-001 is still the single documented Next task.
+- Exit criteria: The first stored-conversation-to-web-chat Context loop passes automated, packaged, and manual verification.
+  - A selected stored conversation creates a faithful brief and zero or more supported Context Items without ordinary manual classification.
+  - Context Items persist with types, epistemic labels, scopes, links, compact evidence, versions, and timestamps.
+  - Context Home and Explorer render the same underlying linked data.
+  - ChatGPT and Claude extension prototypes support explicit whole-chat Save and user-requested Context use.
+  - Unsaved-chat reminders are non-blocking and automatic analysis is durable across restart.
+  - Required automated checks, manual flows, production frontend build, Windows executable build, and packaged-app smoke test pass.
+- Verification evidence: In progress. The TASK-001 persistence slice passed 116 Python tests,
+  19 frontend tests, Ruff, TypeScript, the production frontend build, a fresh clean PyInstaller
+  build, and an isolated packaged startup/schema smoke. Phase exit evidence is not yet available.
+
+Tasks:
+
+- [ ] TASK-001: Implement durable Conversation Brief and Context Item persistence, automatic extraction from one archived conversation, a minimal Context Home and Explorer view, and source-evidence navigation.
+  - Progress: Durable Brief and Context Item persistence, source snapshots, scopes, versions,
+    links, deletion survival, restart durability, and app-startup schema initialization are
+    implemented on the current feature branch. Automatic extraction is the next execution slice.
+- [ ] TASK-002: Implement the ChatGPT and Claude whole-conversation Save to Reweave extension flow with idempotent update and non-blocking save reminders.
+- [ ] TASK-003: Implement the user-requested Use Reweave flow using the current chat and drafted request, with explicit context insertion and on-request refresh.
+- [ ] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
+
+### PHASE-002 — Personalization, trust, and retrieval hardening
+
+- Status: planned
+- Outcome: Reweave can maintain a useful model of the user with little routine management while preventing scope leakage, confident mispersonalization, and retrieval blind spots.
+- Dependencies: PHASE-001.
+- Entry criteria: PHASE-001 works with the product owner's real archive and baseline quality evidence exists.
+  - The first end-to-end Context loop is usable with the product owner's real archive.
+  - Baseline retrieval, prompt, correction, and API-usage evidence exists.
+- Exit criteria: Personalization, scope, retrieval, prompt, correction, Review, and backup contracts pass their regression and manual scenarios.
+  - Core Self, Personal, Work, Projects, and Topics scopes support cross-links and automatic routing.
+  - Values and tacit knowledge are inferred into a distinct visible area with evidence, confidence, and history.
+  - Direct correction updates long-term context with the documented precedence rules and undo.
+  - Private, Work, Client, Shared, unknown, cross-scope, and sensitive cases satisfy their documented policies.
+  - Exact duplicate, expansion, contradiction, stale, and low-confidence paths behave without silent destructive overwrite.
+  - Progressive global retrieval, graph expansion, and low-confidence fallback pass a versioned golden set.
+  - Prompt versions pass extraction, grounding, useful-synthesis, prompt-injection, and scope-leakage regression tests.
+  - Review contains exceptions only.
+  - Encrypted local backup and complete restore pass.
+- Verification evidence: Not available until the phase is done.
+
+Tasks:
+
+- [ ] TASK-005: Implement linked spaces, Core Self, inferred values and tacit knowledge, automatic routing, and visible provenance.
+- [ ] TASK-006: Implement correction precedence, version history, stale confidence, contradiction handling, merge review, and undo.
+- [ ] TASK-007: Implement destination trust, scope isolation, sensitive-use confirmation, risky-export warning, and exception Review.
+- [ ] TASK-008: Implement progressive global retrieval, graph expansion, full-library fallback, and the prompt/retrieval golden evaluation set.
+- [ ] TASK-009: Implement encrypted local backup, one-artifact restore, source removal without derived-context cascade, and separate Library deletion.
+
+### PHASE-003 — Knowledge Graph and privacy-safe sharing
+
+- Status: planned
+- Outcome: Users can discover relationships across projects, concepts, values, and insights through a graph that shares the same model as Home and Explorer.
+- Dependencies: PHASE-002.
+- Entry criteria: PHASE-002 has trustworthy canonical links and passing sensitive-data controls.
+  - Link quality is stable enough that graph edges explain real relationships rather than visual noise.
+  - Scope and sensitive-data controls pass their acceptance scenarios.
+- Exit criteria: Graph discovery and explicit redacted sharing pass their product and privacy scenarios.
+  - Knowledge Graph renders the canonical links used by Home, Explorer, and retrieval.
+  - Users can move from graph nodes to Context Items and source evidence.
+  - The graph helps reveal at least one non-obvious relationship during dogfooding.
+  - Sharing is local by default and exports only user-selected, redacted, previewed content.
+  - Raw personal context and evidence cannot be shared by the default flow.
+- Verification evidence: Not available until the phase is done.
+
+Tasks:
+
+- [ ] TASK-010: Implement the navigable Knowledge Graph on the canonical Context model.
+- [ ] TASK-011: Implement explicit scoped redaction, preview, and image export for privacy-safe graph sharing.
+
+### PHASE-004 — Completeness dogfooding and public beta preparation
+
+- Status: planned
+- Outcome: The product owner can use the full agreed product naturally with real data and decide whether it is ready for a Windows and Chrome/Edge Public Beta.
+- Dependencies: PHASE-003.
+- Entry criteria: All accepted pre-public requirements implemented so far have executable evidence and no high-priority trust defect remains.
+  - All accepted pre-public product requirements implemented so far have executable evidence.
+  - No unresolved high-priority scope or sensitive-data defect remains.
+- Exit criteria: Sustained dogfooding is satisfactory and the product owner has resolved the remaining public-release decisions.
+  - The product owner judges Context Home useful as an evolving representation of their work and thinking.
+  - Use Reweave improves ordinary web-chat work without manual Context Item selection.
+  - Save, analysis, correction, retrieval, scope, backup, restore, Graph, and sharing flows remain stable under sustained real use.
+  - The public v1 scope-freeze decision is resolved.
+  - The pre-public encrypted-synchronization decision is resolved.
+  - Windows installer, Chrome/Edge distribution assets, English documentation, GitHub Issues, and GitHub Discussions support boundaries are ready.
+- Verification evidence: Not available until the phase is done.
+
+Tasks:
+
+- [ ] TASK-012: Run sustained product-owner dogfooding, record defects and protected decisions, and converge the full accepted flow.
+- [ ] TASK-013: Resolve the public v1 scope freeze and encrypted-synchronization timing.
+- [ ] TASK-014: Prepare and verify the Windows and Chrome/Edge Public Beta release surfaces.
+
+## Future candidates
+
+These candidates do not belong to the active implementation sequence unless the product owner explicitly promotes them through a new decision:
+
+- macOS desktop support;
+- Gemini and additional web-chat providers;
+- account-backed encrypted synchronization;
+- managed Reweave LLM usage;
+- external calendar and task-manager writes;
+- mobile companion experiences;
+- team or collaborative Context Libraries;
+- automatic background capture;
+- broader document, PDF, web, or note ingestion.
+
+## Change policy
+
+- Change phase order only after recording the reason and downstream effects.
+- Mark work done only from current verification evidence.
+- Keep future candidates here rather than adding multiple Next tasks to PROJECT_STATUS.md.
+- The user owns product values, public-release judgment, v1 scope freeze, and synchronization timing.
+- The agent owns data schema, algorithms, implementation sequencing inside an accepted task, UI microcopy, validation design, and low-level mechanics, subject to the Product Spec.
