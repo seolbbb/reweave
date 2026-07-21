@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reweave</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="panel" aria-labelledby="title">
+      <header class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>Reweave</span>
+      </header>
+
+      <section class="status-card" aria-live="polite" aria-atomic="true">
+        <span class="status-indicator" aria-hidden="true"></span>
+        <div>
+          <p class="eyebrow">Desktop connection</p>
+          <h1 id="title">Checking Reweave…</h1>
+          <p id="detail" class="detail">Confirming that the local app is available.</p>
+        </div>
+      </section>
+
+      <button id="retry" type="button" hidden>Retry connection</button>
+      <p class="privacy-note">No conversation is read until you choose an explicit action.</p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

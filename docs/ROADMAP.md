@@ -63,7 +63,11 @@ Tasks:
   The first TASK-002 slice added and packaged the no-key local capture contract after 132 Python
   tests, 23 frontend tests, Ruff, a clean executable build, and ChatGPT/Claude created,
   unchanged-repeat, invalid-input, Library, and Search smoke paths passed. Phase exit evidence
-  is not yet available.
+  is not yet available. The second TASK-002 slice added the permission-minimal Manifest V3
+  Chrome/Edge scaffold, authenticated Native Messaging availability boundary, separately
+  packaged host, and registration tooling after 146 Python tests, 23 frontend tests, Ruff, a
+  clean dual-executable build, unpacked Chrome and Edge checks, and packaged ready/unavailable
+  scenarios passed.
 
 Tasks:
 
@@ -81,13 +85,18 @@ Tasks:
     app endpoint accept complete ordered ChatGPT and Claude conversations with immediate no-key
     local persistence, stable provider/external identity, idempotent repeated saves, validation
     without partial writes, restart-readable source data, and packaged endpoint evidence.
-  - Next bounded slice: Create the Manifest V3 Chrome/Edge scaffold and a secure local-app
-    connection and availability handshake before provider page access. Acceptance requires
-    intentional local-service access without opening capture to ordinary web origins, actionable
-    unavailable/conflict/malformed states, compatible Chrome and Edge manifests, and no page
-    reading or broader host permissions yet. Verify with transport and manifest tests, full
-    repository gates, strict document validation, a clean executable build, an unpacked Chromium
-    load, and packaged available/unavailable handshake smokes.
+  - Second bounded slice complete: The permission-minimal Manifest V3 scaffold uses browser
+    Native Messaging, explicit extension-origin allowlisting, an ephemeral authenticated runtime
+    descriptor, a separately packaged console host, and actionable ready/unavailable/incompatible
+    popup states without provider page or localhost permissions. It loads unpacked in Chrome and
+    Edge and passes packaged available/unavailable scenarios.
+  - Next bounded slice: Implement the explicit ChatGPT whole-conversation Save action through
+    the existing native boundary. Page reading begins only after the click, uses the smallest
+    action-triggered ChatGPT permission, normalizes one complete ordered conversation, and reports
+    created, updated, unchanged, unsupported, changed-DOM, unavailable, oversized, and invalid
+    outcomes without partial persistence. Verify with adapter fixtures, action and permission
+    tests, native-host forwarding tests, full gates, a clean executable build, and unpacked
+    Chrome/Edge plus packaged Save smokes. Claude and reminders remain later TASK-002 slices.
 - [ ] TASK-003: Implement the user-requested Use Reweave flow using the current chat and drafted request, with explicit context insertion and on-request refresh.
 - [ ] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
 
