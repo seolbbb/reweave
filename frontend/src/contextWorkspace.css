@@ -1,0 +1,904 @@
+.contextScreen {
+  min-width: 0;
+  height: 100dvh;
+  overflow: auto;
+  background: var(--color-app);
+}
+
+.contextHeader {
+  display: flex;
+  width: min(1180px, calc(100% - 64px));
+  min-height: 156px;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+  margin: 0 auto;
+  padding: 34px 0 24px;
+}
+
+.contextHeader > div:first-child {
+  display: grid;
+  gap: 7px;
+}
+
+.contextHeader h1 {
+  color: var(--color-text);
+  font-size: clamp(34px, 4vw, 48px);
+  font-weight: 650;
+  letter-spacing: -0.045em;
+  line-height: 1;
+}
+
+.contextHeader p {
+  max-width: 680px;
+  color: var(--color-text-secondary);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.contextEyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.contextTotals {
+  display: grid;
+  grid-template-columns: auto minmax(0, 150px);
+  align-items: center;
+  gap: 12px;
+  border-left: 1px solid var(--color-border-strong);
+  padding: 4px 0 4px 20px;
+}
+
+.contextTotals strong {
+  color: var(--color-text);
+  font-size: 30px;
+  font-weight: 600;
+}
+
+.contextTotals span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.contextViewTabs {
+  display: flex;
+  width: min(1180px, calc(100% - 64px));
+  gap: 6px;
+  margin: 0 auto 24px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.contextViewTabs button {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 0 14px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.contextViewTabs button:hover {
+  color: var(--color-text);
+}
+
+.contextViewTabs button.active {
+  border-bottom-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.contextHome {
+  display: grid;
+  width: min(1180px, calc(100% - 64px));
+  gap: 28px;
+  margin: 0 auto;
+  padding-bottom: 56px;
+}
+
+.contextNow,
+.contextCollection {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-paper);
+}
+
+.contextNow {
+  padding: 24px;
+}
+
+.contextSectionHeading,
+.contextCollectionHeading,
+.explorerPaneHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.contextSectionHeading > div {
+  display: grid;
+  gap: 6px;
+}
+
+.contextSectionHeading h2,
+.contextCollectionHeading h2,
+.explorerPaneHeading h2 {
+  color: var(--color-text);
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.contextTextButton {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  padding: 0 4px 0 12px;
+  background: transparent;
+  color: var(--color-accent);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.contextScopeStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.contextScopeStrip > span {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0 11px;
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.contextScopeStrip b {
+  color: var(--color-accent);
+}
+
+.briefGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.briefCard {
+  display: flex;
+  min-width: 0;
+  min-height: 190px;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  padding: 18px;
+  background: var(--color-surface-subtle);
+}
+
+.briefMeta,
+.briefCard footer {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.briefMeta span {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+.briefMeta time {
+  margin-left: auto;
+}
+
+.briefCard h3 {
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.briefCard > p {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.briefCard footer {
+  margin-top: auto;
+}
+
+.briefCard footer span {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.briefCard footer b {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.contextHomeSections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.contextCollection {
+  min-width: 0;
+  padding: 20px;
+}
+
+.contextCollectionHeading {
+  align-items: flex-start;
+  padding-bottom: 16px;
+}
+
+.contextCollectionHeading > span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.contextCollectionHeading > div {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 4px;
+}
+
+.contextCollectionHeading p {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.contextCollectionHeading > b,
+.explorerPaneHeading > b {
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--color-surface-sunken);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.contextCardList {
+  display: grid;
+  gap: 8px;
+}
+
+.contextItemCard,
+.contextBriefEntry {
+  display: grid;
+  min-height: 92px;
+  gap: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.contextItemCard {
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.contextItemCard:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-subtle);
+}
+
+.contextItemType {
+  color: var(--color-accent);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.contextItemCard strong,
+.contextBriefEntry strong {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.contextItemCard small {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.contextBriefEntry small {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contextCollectionEmpty {
+  border-top: 1px solid var(--color-border);
+  padding: 18px 2px 4px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.contextExplorer {
+  display: grid;
+  width: min(1320px, calc(100% - 40px));
+  min-height: calc(100dvh - 230px);
+  grid-template-columns: 230px minmax(300px, 0.8fr) minmax(360px, 1.2fr);
+  margin: 0 auto 32px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-paper);
+}
+
+.contextScopeRail,
+.contextItemPane,
+.contextDetailPane {
+  min-width: 0;
+  overflow: auto;
+}
+
+.contextScopeRail {
+  border-right: 1px solid var(--color-border);
+  padding: 14px 10px;
+  background: var(--color-surface-subtle);
+}
+
+.explorerPaneTitle {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.contextScopeRail nav,
+.explorerItemList {
+  display: grid;
+  gap: 4px;
+}
+
+.contextScopeRail nav button {
+  display: grid;
+  min-height: 52px;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 9px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  text-align: left;
+}
+
+.contextScopeRail nav button:hover,
+.contextScopeRail nav button.active {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.contextScopeRail nav button > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.contextScopeRail nav strong {
+  overflow: hidden;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contextScopeRail nav small {
+  color: var(--color-text-secondary);
+  font-size: 10px;
+}
+
+.contextScopeRail nav b {
+  font-size: 11px;
+}
+
+.contextItemPane {
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.explorerPaneHeading {
+  min-height: 80px;
+  border-bottom: 1px solid var(--color-border);
+  padding: 14px 18px;
+}
+
+.explorerPaneHeading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.explorerPaneHeading span {
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.explorerItemList {
+  padding: 8px;
+}
+
+.explorerItemList button {
+  display: grid;
+  min-height: 92px;
+  gap: 7px;
+  border: 0;
+  border-radius: 8px;
+  padding: 13px 14px;
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+}
+
+.explorerItemList button:hover,
+.explorerItemList button.active {
+  background: var(--color-accent-subtle);
+}
+
+.explorerItemList button > span {
+  color: var(--color-accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.explorerItemList button > strong {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.explorerItemList button > small {
+  color: var(--color-text-secondary);
+  font-size: 10px;
+}
+
+.contextDetailPane {
+  padding: 24px;
+  background: #fcfdfd;
+}
+
+.contextDetail {
+  display: grid;
+  gap: 24px;
+}
+
+.contextDetail > header {
+  display: grid;
+  gap: 12px;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 20px;
+}
+
+.contextDetailLabels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.contextDetailLabels span,
+.contextDetailScopes span {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  padding: 0 9px;
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.contextDetailLabels span.sensitive {
+  background: var(--color-danger-subtle);
+  color: var(--color-danger);
+}
+
+.contextDetail h2 {
+  color: var(--color-text);
+  font-size: clamp(20px, 2.3vw, 27px);
+  font-weight: 620;
+  letter-spacing: -0.025em;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.contextDetail > header > p,
+.contextDetailMuted,
+.contextEvidenceNote {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.contextMetadata {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.contextMetadata > div {
+  display: grid;
+  gap: 4px;
+  padding: 11px;
+}
+
+.contextMetadata > div + div {
+  border-left: 1px solid var(--color-border);
+}
+
+.contextMetadata dt {
+  color: var(--color-text-secondary);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.contextMetadata dd {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.contextDetail > section {
+  display: grid;
+  gap: 10px;
+}
+
+.contextDetail > section h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.contextDetailScopes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.contextEvidence {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  border-left: 3px solid var(--color-accent);
+  padding: 14px 16px;
+  background: var(--color-surface-subtle);
+}
+
+.contextEvidence blockquote {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.contextEvidence figcaption {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+}
+
+.contextEvidence figcaption span {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contextEvidence figcaption b {
+  color: var(--color-success);
+  white-space: nowrap;
+}
+
+.contextLoading,
+.contextStateCard,
+.explorerEmpty {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+}
+
+.contextLoading {
+  width: min(560px, calc(100% - 40px));
+  gap: 8px;
+  margin: 80px auto;
+  color: var(--color-accent);
+}
+
+.contextLoading strong {
+  color: var(--color-text);
+  font-size: 15px;
+}
+
+.contextLoading span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.contextStateCard {
+  width: min(620px, calc(100% - 40px));
+  gap: 12px;
+  margin: 56px auto;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 40px;
+  background: var(--color-surface);
+  color: var(--color-danger);
+  box-shadow: var(--shadow-paper);
+}
+
+.contextStateCard h2 {
+  color: var(--color-text);
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.contextStateCard > p {
+  max-width: 480px;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.contextEmptyState {
+  color: var(--color-accent);
+}
+
+.contextEmptyIcon {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--color-accent-subtle);
+}
+
+.explorerEmpty {
+  align-content: center;
+  min-height: 240px;
+  gap: 8px;
+  padding: 30px;
+  color: var(--color-text-secondary);
+}
+
+.explorerEmpty h3 {
+  color: var(--color-text);
+  font-size: 15px;
+}
+
+.explorerEmpty p {
+  max-width: 310px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+@media (max-width: 1100px) {
+  .briefGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .briefCard:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+
+  .contextExplorer {
+    grid-template-columns: 210px minmax(260px, 1fr);
+  }
+
+  .contextDetailPane {
+    grid-column: 1 / -1;
+    min-height: 360px;
+    border-top: 1px solid var(--color-border);
+  }
+}
+
+@media (max-width: 760px) {
+  .contextScreen {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .contextHeader,
+  .contextViewTabs,
+  .contextHome {
+    width: min(100% - 32px, 640px);
+  }
+
+  .contextHeader {
+    min-height: 0;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 18px;
+    padding: 28px 0 20px;
+  }
+
+  .contextHeader h1 {
+    font-size: 36px;
+  }
+
+  .contextHeader p {
+    font-size: 16px;
+  }
+
+  .contextEvidence blockquote {
+    font-size: 14px;
+  }
+
+  .contextTotals {
+    grid-template-columns: auto minmax(0, 1fr);
+    border-left: 0;
+    padding: 0;
+  }
+
+  .contextViewTabs {
+    position: sticky;
+    z-index: 10;
+    top: 118px;
+    margin-bottom: 16px;
+    background: var(--color-app);
+  }
+
+  .contextNow,
+  .contextCollection {
+    padding: 16px;
+  }
+
+  .contextSectionHeading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .contextTextButton {
+    padding-left: 0;
+  }
+
+  .briefGrid,
+  .contextHomeSections {
+    grid-template-columns: 1fr;
+  }
+
+  .briefCard:last-child:nth-child(odd) {
+    grid-column: auto;
+  }
+
+  .contextExplorer {
+    width: min(100% - 20px, 640px);
+    min-height: 0;
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .contextScopeRail,
+  .contextItemPane,
+  .contextDetailPane {
+    overflow: visible;
+  }
+
+  .contextScopeRail,
+  .contextItemPane {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .contextScopeRail nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .contextDetailPane {
+    grid-column: auto;
+    min-height: 300px;
+    padding: 18px;
+  }
+
+  .contextStateCard {
+    padding: 28px 20px;
+  }
+}
+
+@media (max-width: 430px) {
+  .contextScopeRail nav {
+    grid-template-columns: 1fr;
+  }
+
+  .contextMetadata {
+    grid-template-columns: 1fr;
+  }
+
+  .contextMetadata > div + div {
+    border-top: 1px solid var(--color-border);
+    border-left: 0;
+  }
+}
