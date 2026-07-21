@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Reweave delivery plan | Claude</title>
+  </head>
+  <body>
+    <main>
+      <section data-message-id="claude-user-1" data-message-timestamp="2026-07-21T10:00:00Z">
+        <div data-testid="user-message">Keep this Claude question.<br />Second line.</div>
+        <button>Edit</button>
+      </section>
+      <section data-message-id="claude-assistant-1" data-message-timestamp="2026-07-21T10:00:30+00:00">
+        <div class="font-claude-response">
+          <span class="sr-only">Claude responded:</span>
+          <div class="font-claude-response-body">
+            <p>This Claude answer stays ordered.</p>
+            <p>No response toolbar is captured.</p>
+          </div>
+          <div role="toolbar"><button data-testid="copy-button">Copy</button></div>
+        </div>
+      </section>
+      <section data-message-id="claude-user-2">
+        <div data-testid="user-message">Keep the follow-up too.</div>
+      </section>
+      <section data-message-id="claude-assistant-2" data-message-timestamp="2026-07-21T10:02:00Z">
+        <div class="font-claude-response">
+          <div class="font-claude-response-body">The follow-up remains in the same conversation.</div>
+          <button data-testid="feedback-button">Helpful</button>
+        </div>
+      </section>
+    </main>
+    <footer>
+      <div contenteditable="true" data-testid="composer-input">Unsent draft must not be captured.</div>
+    </footer>
+  </body>
+</html>
