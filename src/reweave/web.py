@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import httpx
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr
 
 from reweave.archive import ArchiveStore, ImportSummary
 from reweave.archive_answers import answer_archive
+from reweave.archive_management import ArchiveManager
 from reweave.insights import generate_insight_report
 from reweave.llm import (
     LLMSettings,
@@ -38,10 +40,19 @@ from reweave.llm_profiles import (
     ProfileInput,
     ensure_default_profiles,
 )
+from reweave.memory_audits import (
+    AuditEvidence,
+    AuditSession,
+    MemoryAuditStore,
+    classify_memory_claim,
+    extract_memory_claims,
+    suggest_audit_evidence,
+)
 from reweave.paths import get_app_paths
 from reweave.semantic import SearchEngine, SemanticIndex, SemanticUnavailableError
 
 UPLOAD_FILES = File(...)
+UPLOAD_BACKUP = File(...)
 
 
 class ImportRequest(BaseModel):
@@ -111,6 +122,56 @@ class LLMModelRequest(BaseModel):
     model: str
 
 
+class MemoryAuditExtractRequest(BaseModel):
+    assistant_source: Literal["chatgpt", "claude"] = "chatgpt"
+    raw_text: str = Field(min_length=1, max_length=50_000)
+    settings: LLMSettingsRequest
+
+
+class MemoryAuditClaimInput(BaseModel):
+    claim_text: str = Field(min_length=1, max_length=5_000)
+    llm_statement_kind: str = ""
+    llm_evidence_verdict: str = ""
+    llm_issue_tags: list[str] = Field(default_factory=list)
+    llm_severity: str = ""
+    llm_rationale: str = ""
+    search_queries: list[str] = Field(default_factory=list)
+
+
+class MemoryAuditCreateRequest(BaseModel):
+    assistant_source: Literal["chatgpt", "claude"] = "chatgpt"
+    items: list[MemoryAuditClaimInput] = Field(min_length=1, max_length=100)
+
+
+class MemoryAuditEvidenceInput(BaseModel):
+    conversation_id: str
+    message_id: str
+    message_index: int
+    relationship: Literal["supports", "contradicts", "context"]
+
+
+class MemoryAuditItemUpdateRequest(BaseModel):
+    statement_kind: Literal["direct_statement", "model_inference", "unclear"]
+    evidence_verdict: Literal[
+        "supported", "contradicted", "mixed", "not_found", "unclear"
+    ]
+    issue_tags: list[str] = Field(default_factory=list)
+    severity: Literal["low", "medium", "high", "unclear"]
+    redacted_example: str = Field(default="", max_length=2_000)
+    notes: str = Field(default="", max_length=5_000)
+    evidence: list[MemoryAuditEvidenceInput] = Field(default_factory=list, max_length=20)
+
+
+class MemoryAuditEvidenceRequest(BaseModel):
+    all_sources: bool = False
+    settings: LLMSettingsRequest | None = None
+
+
+class MemoryAuditSessionUpdateRequest(BaseModel):
+    status: Literal["completed"]
+    provenance_understood: bool = False
+
+
 def create_app(
     db_path: Path,
     static_dir: Path | None = None,
@@ -119,11 +180,13 @@ def create_app(
     """Create the FastAPI app."""
     app = FastAPI(title="Reweave")
     store = ArchiveStore(db_path)
+    archive_manager = ArchiveManager(db_path)
     app_paths = get_app_paths(data_dir)
     profile_store = LLMProfileStore(app_paths.llm_profiles_path)
     ensure_default_profiles(profile_store)
     semantic_index = SemanticIndex(db_path, app_paths.models_dir)
     search_engine = SearchEngine(store, semantic_index)
+    memory_audit_store = MemoryAuditStore(app_paths.memory_audit_db_path)
     insight_jobs: dict[str, dict[str, Any]] = {}
     insight_jobs_lock = Lock()
     insight_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="reweave-job")
@@ -310,6 +373,7 @@ def create_app(
         return {
             "data_dir": str(app_paths.data_dir),
             "db_path": str(db_path),
+            "memory_audit_db_path": str(app_paths.memory_audit_db_path),
             "imports_dir": str(app_paths.imports_dir),
             "extracted_dir": str(app_paths.extracted_dir),
             "models_dir": str(app_paths.models_dir),
@@ -327,6 +391,35 @@ def create_app(
                 }
                 for row in stats.by_source
             ]
+        }
+
+    @app.get("/api/library")
+    def library(
+        source: str | None = None,
+        title: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        sort: str = "newest",
+        offset: int = 0,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        try:
+            page = archive_manager.list_conversations(
+                source=source,
+                title=title,
+                date_from=date_from,
+                date_to=date_to,
+                sort=sort,
+                offset=offset,
+                limit=limit,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "results": [result.__dict__ for result in page.results],
+            "total": page.total,
+            "offset": page.offset,
+            "limit": page.limit,
         }
 
     @app.get("/api/search")
@@ -359,6 +452,165 @@ def create_app(
             "semantic_status": semantic_index.status().to_dict(),
             "results": [_conversation_search_result_to_dict(result) for result in results],
         }
+
+    @app.post("/api/memory-audits/extract")
+    def extract_memory_audit_items(request: MemoryAuditExtractRequest) -> dict[str, Any]:
+        try:
+            settings, llm_provider = _resolve_llm_settings(request.settings, profile_store)
+            claims = extract_memory_claims(
+                request.raw_text,
+                assistant_source=request.assistant_source,
+                settings=settings,
+                provider=llm_provider,
+            )
+        except (
+            ProviderConfigurationError,
+            ProviderRequestError,
+            httpx.HTTPError,
+            ValueError,
+        ) as exc:
+            raise HTTPException(status_code=400, detail=_insight_job_error(exc)) from exc
+        return {"items": claims}
+
+    @app.get("/api/memory-audits")
+    def list_memory_audits() -> dict[str, Any]:
+        return {"results": memory_audit_store.list_sessions()}
+
+    @app.post("/api/memory-audits", status_code=201)
+    def create_memory_audit(request: MemoryAuditCreateRequest) -> dict[str, Any]:
+        try:
+            session = memory_audit_store.create_session(
+                request.assistant_source,
+                [item.model_dump() for item in request.items],
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _memory_audit_session_to_dict(session, store)
+
+    @app.get("/api/memory-audits/{session_id}")
+    def get_memory_audit(session_id: str) -> dict[str, Any]:
+        session = memory_audit_store.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Memory-audit session not found.")
+        return _memory_audit_session_to_dict(session, store)
+
+    @app.patch("/api/memory-audits/{session_id}")
+    def update_memory_audit_session(
+        session_id: str,
+        request: MemoryAuditSessionUpdateRequest,
+    ) -> dict[str, Any]:
+        try:
+            session = memory_audit_store.complete_session(
+                session_id,
+                provenance_understood=request.provenance_understood,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _memory_audit_session_to_dict(session, store)
+
+    @app.patch("/api/memory-audits/{session_id}/items/{item_id}")
+    def update_memory_audit_item(
+        session_id: str,
+        item_id: str,
+        request: MemoryAuditItemUpdateRequest,
+    ) -> dict[str, Any]:
+        item = memory_audit_store.get_item(item_id)
+        if item is None or item.session_id != session_id:
+            raise HTTPException(status_code=404, detail="Memory-audit item not found.")
+        try:
+            session = memory_audit_store.update_item(
+                item_id,
+                statement_kind=request.statement_kind,
+                evidence_verdict=request.evidence_verdict,
+                issue_tags=request.issue_tags,
+                severity=request.severity,
+                redacted_example=request.redacted_example,
+                notes=request.notes,
+                evidence=[evidence.model_dump() for evidence in request.evidence],
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _memory_audit_session_to_dict(session, store)
+
+    @app.post("/api/memory-audits/{session_id}/items/{item_id}/evidence-suggestions")
+    def get_memory_audit_evidence_suggestions(
+        session_id: str,
+        item_id: str,
+        request: MemoryAuditEvidenceRequest,
+    ) -> dict[str, Any]:
+        item = memory_audit_store.get_item(item_id)
+        session = memory_audit_store.get_session(session_id)
+        if item is None or session is None or item.session_id != session_id:
+            raise HTTPException(status_code=404, detail="Memory-audit item not found.")
+        try:
+            candidates, mode_used = suggest_audit_evidence(
+                search_engine,
+                item=item,
+                assistant_source=session.assistant_source,
+                all_sources=request.all_sources,
+            )
+        except (SemanticUnavailableError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        suggestion = None
+        suggestion_error = None
+        if request.settings is not None:
+            try:
+                settings, llm_provider = _resolve_llm_settings(request.settings, profile_store)
+                suggestion = classify_memory_claim(
+                    item,
+                    candidates,
+                    settings=settings,
+                    provider=llm_provider,
+                )
+            except (
+                ProviderConfigurationError,
+                ProviderRequestError,
+                httpx.HTTPError,
+                ValueError,
+            ) as exc:
+                suggestion_error = _insight_job_error(exc)
+        return {
+            "mode_used": mode_used,
+            "candidates": [candidate.__dict__ for candidate in candidates],
+            "suggestion": suggestion,
+            "suggestion_error": suggestion_error,
+        }
+
+    @app.get("/api/memory-audits/{session_id}/export")
+    def export_memory_audit(
+        session_id: str,
+        format: Literal["json", "csv"] = "json",
+    ) -> Response:
+        try:
+            if format == "csv":
+                content = memory_audit_store.redacted_csv(session_id)
+                media_type = "text/csv; charset=utf-8"
+            else:
+                content = json.dumps(
+                    memory_audit_store.redacted_export(session_id),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                media_type = "application/json"
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        filename = f"memory-audit-{session_id[:8]}.{format}"
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.delete("/api/memory-audits/{session_id}", status_code=204)
+    def delete_memory_audit(session_id: str) -> Response:
+        try:
+            memory_audit_store.delete_session(session_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return Response(status_code=204)
 
     @app.get("/api/semantic/status")
     def semantic_status() -> dict[str, object]:
@@ -447,13 +699,57 @@ def create_app(
             "messages": [message.__dict__ for message in messages],
         }
 
+    @app.delete("/api/conversations/{conversation_id}")
+    def delete_conversation(conversation_id: str) -> dict[str, int]:
+        try:
+            summary = archive_manager.delete_conversation(conversation_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return summary.__dict__
+
+    @app.delete("/api/archive/sources/{source}")
+    def delete_archive_source(source: str) -> dict[str, int]:
+        try:
+            summary = archive_manager.delete_source(source)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return summary.__dict__
+
+    @app.get("/api/archive/backup")
+    def backup_archive() -> StreamingResponse:
+        stamp = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+        filename = f"reweave-backup-{stamp}.sqlite3"
+        temporary_path = app_paths.data_dir / "backup-downloads" / f"{uuid4().hex}.sqlite3"
+        archive_manager.backup_to(temporary_path)
+        return StreamingResponse(
+            _stream_file_and_remove(temporary_path),
+            media_type="application/vnd.sqlite3",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.post("/api/archive/restore")
+    def restore_archive(file: UploadFile = UPLOAD_BACKUP) -> dict[str, Any]:
+        filename = _safe_upload_name(file.filename)
+        if Path(filename).suffix.lower() not in {".db", ".sqlite", ".sqlite3"}:
+            raise HTTPException(status_code=400, detail="Choose a Reweave SQLite backup file.")
+        temporary_path = app_paths.imports_dir / f"restore-{uuid4().hex}-{filename}"
+        with open(temporary_path, "wb") as destination:
+            shutil.copyfileobj(file.file, destination)
+        try:
+            summary = archive_manager.restore_from(
+                temporary_path,
+                safety_backup_dir=app_paths.data_dir / "backups",
+            )
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        return summary.__dict__
+
     @app.post("/api/import")
     def import_directory(request: ImportRequest) -> dict[str, Any]:
         try:
-            summary = store.import_path(
-                Path(request.input_dir),
-                extraction_root=app_paths.extracted_dir,
-            )
+            summary = store.import_path(Path(request.input_dir))
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _import_summary_to_dict(summary)
@@ -461,10 +757,7 @@ def create_app(
     @app.post("/api/import/path")
     def import_path(request: ImportPathRequest) -> dict[str, Any]:
         try:
-            summary = store.import_path(
-                Path(request.path),
-                extraction_root=app_paths.extracted_dir,
-            )
+            summary = store.import_path(Path(request.path))
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _import_summary_to_dict(summary)
@@ -481,11 +774,11 @@ def create_app(
             with open(target_path, "wb") as destination:
                 shutil.copyfileobj(upload.file, destination)
             try:
-                summaries.append(
-                    store.import_path(target_path, extraction_root=app_paths.extracted_dir)
-                )
+                summaries.append(store.import_path(target_path))
             except (OSError, ValueError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+            finally:
+                target_path.unlink(missing_ok=True)
 
         return _import_summary_to_dict(_merge_import_summaries(summaries))
 
@@ -806,6 +1099,102 @@ def create_app(
     return app
 
 
+def _memory_audit_session_to_dict(
+    session: AuditSession,
+    archive_store: ArchiveStore,
+) -> dict[str, Any]:
+    source_cache: dict[str, tuple[Any, dict[str, Any]]] = {}
+    items = []
+    for item in session.items:
+        evidence = [
+            _memory_audit_evidence_to_dict(reference, archive_store, source_cache)
+            for reference in item.evidence
+        ]
+        items.append(
+            {
+                "id": item.id,
+                "session_id": item.session_id,
+                "claim_text": item.claim_text,
+                "llm_statement_kind": item.llm_statement_kind,
+                "llm_evidence_verdict": item.llm_evidence_verdict,
+                "llm_issue_tags": list(item.llm_issue_tags),
+                "llm_severity": item.llm_severity,
+                "llm_rationale": item.llm_rationale,
+                "search_queries": list(item.search_queries),
+                "user_statement_kind": item.user_statement_kind,
+                "user_evidence_verdict": item.user_evidence_verdict,
+                "user_issue_tags": list(item.user_issue_tags),
+                "user_severity": item.user_severity,
+                "redacted_example": item.redacted_example,
+                "notes": item.notes,
+                "evidence": evidence,
+                "created_at": item.created_at,
+                "updated_at": item.updated_at,
+            }
+        )
+    reviewed_count = sum(
+        bool(
+            item.user_statement_kind
+            and item.user_evidence_verdict
+            and item.user_severity
+        )
+        for item in session.items
+    )
+    return {
+        "id": session.id,
+        "assistant_source": session.assistant_source,
+        "status": session.status,
+        "provenance_understood": session.provenance_understood,
+        "first_discrepancy_at": session.first_discrepancy_at,
+        "started_at": session.started_at,
+        "completed_at": session.completed_at,
+        "updated_at": session.updated_at,
+        "item_count": len(session.items),
+        "reviewed_count": reviewed_count,
+        "discrepancy_count": sum(bool(item.user_issue_tags) for item in session.items),
+        "items": items,
+    }
+
+
+def _memory_audit_evidence_to_dict(
+    reference: AuditEvidence,
+    archive_store: ArchiveStore,
+    source_cache: dict[str, tuple[Any, dict[str, Any]]],
+) -> dict[str, Any]:
+    if reference.conversation_id not in source_cache:
+        conversation = archive_store.get_conversation(reference.conversation_id)
+        messages = (
+            {
+                message.id: message
+                for message in archive_store.get_messages(reference.conversation_id)
+            }
+            if conversation is not None
+            else {}
+        )
+        source_cache[reference.conversation_id] = (conversation, messages)
+    conversation, messages = source_cache[reference.conversation_id]
+    message = messages.get(reference.message_id)
+    base = {
+        "id": reference.id,
+        "conversation_id": reference.conversation_id,
+        "message_id": reference.message_id,
+        "message_index": reference.message_index,
+        "relationship": reference.relationship,
+    }
+    if conversation is None or message is None:
+        return {**base, "available": False, "title": "Source unavailable", "excerpt": ""}
+    compact = " ".join(message.content.split())
+    return {
+        **base,
+        "available": True,
+        "source": conversation.source,
+        "title": conversation.title,
+        "role": message.role,
+        "timestamp": message.timestamp,
+        "excerpt": compact if len(compact) <= 480 else f"{compact[:480].rstrip()}...",
+    }
+
+
 def _conversation_search_result_to_dict(result) -> dict[str, Any]:
     return {
         "id": result.id,
@@ -849,6 +1238,15 @@ def _safe_upload_name(filename: str | None) -> str:
     name = Path(filename or "upload").name
     sanitized = "".join(char if char.isalnum() or char in "._-" else "_" for char in name)
     return sanitized or "upload"
+
+
+def _stream_file_and_remove(path: Path):
+    try:
+        with open(path, "rb") as file:
+            while chunk := file.read(1024 * 1024):
+                yield chunk
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def _resolve_llm_settings(

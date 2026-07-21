@@ -25,6 +25,7 @@ import {
   Save,
   Search,
   Settings,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Trash2,
@@ -36,9 +37,11 @@ import {
   type CitationTarget,
   type MarkdownHeading
 } from "./MarkdownContent";
+import { LibraryView, OnboardingWizard } from "./ArchiveManagement";
+import { MemoryAuditView, type AuditLLMSettings } from "./MemoryAudit";
 import { HighlightedText, extractHighlightTerms } from "./textHighlight";
 
-type View = "search" | "reports" | "import" | "settings";
+type View = "library" | "audit" | "search" | "reports" | "import" | "settings";
 type SearchMode = "auto" | "keyword" | "semantic";
 
 type Excerpt = {
@@ -122,6 +125,7 @@ type ImportSummary = {
 type AppPaths = {
   data_dir: string;
   db_path: string;
+  memory_audit_db_path: string;
   imports_dir: string;
   extracted_dir: string;
   models_dir: string;
@@ -270,6 +274,7 @@ export function Workspace() {
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [status, setStatus] = useState("Search your imported archive.");
   const [importStatus, setImportStatus] = useState("Drop files or choose a .zip/.json export.");
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const modelRequest = useRef(0);
 
   const selectedResults = useMemo(() => Object.values(selectedById), [selectedById]);
@@ -290,6 +295,14 @@ export function Workspace() {
   const archiveConversationCount = sourceFacets.reduce((total, facet) => total + facet.conversations, 0);
   const archiveMessageCount = sourceFacets.reduce((total, facet) => total + facet.messages, 0);
   const modelReady = activeProfile?.connected && modelLoad.status === "success" && Boolean(model);
+  const auditLLMSettings: AuditLLMSettings | null = activeProfile && model
+    ? {
+        profile_id: activeProfile.id,
+        model,
+        max_context_chars: maxContextChars,
+        temperature
+      }
+    : null;
 
   useEffect(() => {
     void loadInitialData();
@@ -314,7 +327,14 @@ export function Workspace() {
   }, [activeProfile?.id, activeProfile?.base_url, activeProfile?.connected]);
 
   async function loadInitialData() {
-    await Promise.all([loadPaths(), loadFacets(), loadProfiles(), loadReports(), loadSemanticStatus()]);
+    const [, conversationCount] = await Promise.all([
+      loadPaths(),
+      loadFacets(),
+      loadProfiles(),
+      loadReports(),
+      loadSemanticStatus()
+    ]);
+    if (conversationCount === 0 && !hasCompletedOnboarding()) setOnboardingOpen(true);
   }
 
   async function loadSemanticStatus() {
@@ -337,8 +357,10 @@ export function Workspace() {
     try {
       const data = await api<{ sources: SourceFacet[] }>("/api/facets");
       setSourceFacets(data.sources ?? []);
+      return (data.sources ?? []).reduce((total, facet) => total + facet.conversations, 0);
     } catch {
       setSourceFacets([]);
+      return null;
     }
   }
 
@@ -658,9 +680,9 @@ export function Workspace() {
     }
   }
 
-  async function importFiles(files: FileList | File[]) {
+  async function importFiles(files: FileList | File[]): Promise<ImportSummary | null> {
     const fileList = Array.from(files);
-    if (!fileList.length) return;
+    if (!fileList.length) return null;
     setBusy(true);
     setImportStatus(`Importing ${fileList.length} file${fileList.length === 1 ? "" : "s"}...`);
     try {
@@ -669,8 +691,10 @@ export function Workspace() {
       const summary = await api<ImportSummary>("/api/import/upload", { method: "POST", body: formData });
       setImportStatus(formatImportStatus(summary));
       await Promise.all([loadFacets(), loadSemanticStatus()]);
+      return summary;
     } catch (error) {
       setImportStatus(messageFrom(error, "Import failed."));
+      return null;
     } finally {
       setBusy(false);
     }
@@ -826,6 +850,27 @@ export function Workspace() {
     if (view === "reports" && !insight && reports[0]) void openReport(reports[0].id);
   }
 
+  async function refreshArchiveData() {
+    setDetail(null);
+    setResults([]);
+    setSelectedById({});
+    setArchiveAnswer(null);
+    setInsight(null);
+    await Promise.all([loadFacets(), loadReports(), loadSemanticStatus()]);
+  }
+
+  function finishOnboarding(destination: "library" | "search") {
+    rememberOnboardingComplete();
+    setOnboardingOpen(false);
+    setActiveView(destination);
+  }
+
+  function dismissOnboarding() {
+    rememberOnboardingComplete();
+    setOnboardingOpen(false);
+    setActiveView("import");
+  }
+
   return (
     <main className="workspaceShell">
       <Navigation
@@ -834,6 +879,51 @@ export function Workspace() {
         conversationCount={archiveConversationCount}
         onNavigate={switchView}
       />
+      {activeView === "library" && (
+        <>
+          <LibraryView
+            paths={paths}
+            sourceFacets={sourceFacets}
+            onOpenConversation={(id) => void openDetail(id)}
+            onImport={() => setActiveView("import")}
+            onArchiveChanged={refreshArchiveData}
+          />
+          {detail && (
+            <div className="libraryDrawerBackdrop" role="presentation" onClick={() => setDetail(null)}>
+              <aside className="libraryDrawerPanel" onClick={(event) => event.stopPropagation()}>
+                <ConversationDrawer
+                  detail={detail}
+                  close={() => setDetail(null)}
+                  targetIndex={detailMessageIndex}
+                  label="Archived conversation"
+                />
+              </aside>
+            </div>
+          )}
+        </>
+      )}
+      {activeView === "audit" && (
+        <>
+          <MemoryAuditView
+            modelReady={Boolean(modelReady)}
+            llmSettings={auditLLMSettings}
+            onOpenEvidence={(conversationId, messageIndex) => void openDetail(conversationId, messageIndex)}
+            onOpenSettings={() => setActiveView("settings")}
+          />
+          {detail && (
+            <div className="libraryDrawerBackdrop" role="presentation" onClick={() => setDetail(null)}>
+              <aside className="libraryDrawerPanel" onClick={(event) => event.stopPropagation()}>
+                <ConversationDrawer
+                  detail={detail}
+                  close={() => setDetail(null)}
+                  targetIndex={detailMessageIndex}
+                  label="Audit evidence"
+                />
+              </aside>
+            </div>
+          )}
+        </>
+      )}
       {activeView === "search" && (
         <SearchView
           query={query}
@@ -912,6 +1002,7 @@ export function Workspace() {
           busy={busy}
           importFiles={importFiles}
           importLocalPath={importLocalPath}
+          showOnboarding={() => setOnboardingOpen(true)}
         />
       )}
       {activeView === "settings" && (
@@ -949,6 +1040,13 @@ export function Workspace() {
           deleteSemanticModel={deleteSemanticModel}
         />
       )}
+      <OnboardingWizard
+        open={onboardingOpen}
+        busy={busy}
+        onImport={importFiles}
+        onFinish={finishOnboarding}
+        onDismiss={dismissOnboarding}
+      />
     </main>
   );
 }
@@ -965,6 +1063,8 @@ function Navigation({
   onNavigate: (view: View) => void;
 }) {
   const items: Array<{ view: View; label: string; icon: React.ReactNode }> = [
+    { view: "library", label: "Library", icon: <Library size={19} /> },
+    { view: "audit", label: "Audit", icon: <ShieldCheck size={19} /> },
     { view: "search", label: "Search", icon: <Search size={19} /> },
     { view: "reports", label: "Reports", icon: <FileText size={19} /> },
     { view: "import", label: "Import", icon: <CloudUpload size={19} /> },
@@ -1056,32 +1156,36 @@ function SearchView(props: SearchViewProps) {
         </header>
         <div className="searchControls">
           <div className="searchInput">
-            <Search size={19} />
-            <input
-              aria-label="Search archive"
-              value={props.query}
-              onChange={(event) => props.setQuery(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && props.runSearch()}
-              placeholder="Search topics, phrases, or ideas"
-            />
-            {props.query && (
-              <button type="button" onClick={() => props.setQuery("")} aria-label="Clear search">
-                <X size={17} />
+            <div className="searchField">
+              <Search size={19} aria-hidden="true" />
+              <input
+                aria-label="Search archive"
+                value={props.query}
+                onChange={(event) => props.setQuery(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && props.runSearch()}
+                placeholder="Search topics, phrases, or ideas"
+              />
+              {props.query && (
+                <button type="button" onClick={() => props.setQuery("")} aria-label="Clear search">
+                  <X size={17} />
+                </button>
+              )}
+            </div>
+            <div className="searchActions">
+              <button className="searchSubmit" type="button" onClick={props.runSearch} disabled={props.busy}>
+                {props.busy ? <Loader2 className="spin" size={17} /> : <Search size={17} />}
+                Search
               </button>
-            )}
-            <button className="searchSubmit" type="button" onClick={props.runSearch} disabled={props.busy}>
-              {props.busy ? <Loader2 className="spin" size={17} /> : <Search size={17} />}
-              Search
-            </button>
-            <button
-              className="askSubmit"
-              type="button"
-              onClick={props.askArchive}
-              disabled={props.answerBusy}
-            >
-              {props.answerBusy ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
-              Ask archive
-            </button>
+              <button
+                className="askSubmit"
+                type="button"
+                onClick={props.askArchive}
+                disabled={props.answerBusy}
+              >
+                {props.answerBusy ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
+                Ask archive
+              </button>
+            </div>
           </div>
           <div className="filterRow">
             <label className="modePicker">
@@ -1560,7 +1664,8 @@ function ImportView({
   importStatus,
   busy,
   importFiles,
-  importLocalPath
+  importLocalPath,
+  showOnboarding
 }: {
   paths: AppPaths | null;
   sourceFacets: SourceFacet[];
@@ -1572,13 +1677,19 @@ function ImportView({
   busy: boolean;
   importFiles: (files: FileList | File[]) => void;
   importLocalPath: () => void;
+  showOnboarding: () => void;
 }) {
   return (
     <section className="singlePage">
-      <header className="pageHeader">
-        <span className="sectionLabel">Local archive</span>
-        <h1>Import conversations</h1>
-        <p>Add ChatGPT or Claude exports. Reweave keeps your searchable archive on this device.</p>
+      <header className="pageHeader importHeader">
+        <div>
+          <span className="sectionLabel">Local archive</span>
+          <h1>Import conversations</h1>
+          <p>Add ChatGPT or Claude exports. Reweave keeps your searchable archive on this device.</p>
+        </div>
+        <button className="secondaryButton" type="button" onClick={showOnboarding}>
+          <BookOpen size={16} /> Export guide
+        </button>
       </header>
       <div className="statsGrid">
         <div><Database size={20} /><span><strong>{conversationCount.toLocaleString()}</strong><small>Conversations</small></span></div>
@@ -1831,4 +1942,20 @@ function chooseModel(current: string, saved: string, models: string[], provider:
   if (models.includes(saved)) return saved;
   const preference = provider === "anthropic" ? "sonnet" : provider === "gemini" ? "flash" : "mini";
   return models.find((item) => item.toLocaleLowerCase().includes(preference)) ?? models[0] ?? "";
+}
+
+function hasCompletedOnboarding() {
+  try {
+    return window.localStorage.getItem("reweave:onboarding-complete:v1") === "true";
+  } catch {
+    return false;
+  }
+}
+
+function rememberOnboardingComplete() {
+  try {
+    window.localStorage.setItem("reweave:onboarding-complete:v1", "true");
+  } catch {
+    // Onboarding still works when storage is unavailable in a restricted webview.
+  }
 }

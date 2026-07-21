@@ -1,4 +1,4 @@
-﻿# AGENTS.md
+# AGENTS.md
 
 ## CRITICAL: PULL REQUEST TARGET BRANCH (NEVER DELETE THIS SECTION)
 
@@ -75,6 +75,35 @@ reweave/
 ├── README.md           # Project readme
 └── AGENTS.md           # This file
 ```
+
+---
+
+## CRITICAL: PRODUCT STRATEGY AND PROGRESS TRACKING
+
+`docs/PRODUCT_STRATEGY_AND_ROADMAP.md` is the canonical product strategy,
+competitive rationale, roadmap, decision log, and delivery tracker for Reweave.
+
+For every task in this repository, agents and contributors MUST:
+
+1. Read `docs/PRODUCT_STRATEGY_AND_ROADMAP.md` before planning or changing work.
+2. Add or update an entry in its **Current Delivery Tracker** or **Task Work Log**
+   before implementation begins. Use `Maintenance / Other` when the task does
+   not map directly to a roadmap phase.
+3. Keep the entry current when scope, status, assumptions, or blockers change.
+4. Before declaring completion, record the outcome, validation evidence, tests,
+   and executable build result when the build requirement applies.
+5. Record product or architecture choices in the **Decision Log**, including the
+   reason and any superseded decision.
+
+Allowed task statuses are `Not started`, `In progress`, `Blocked`, `Deferred`,
+and `Complete`. Never mark an item `Complete` without evidence. Do not erase
+historical work-log or decision-log entries; supersede them with a new dated
+entry when direction changes.
+
+Updating the strategy document is part of the definition of done for every
+task, including bug fixes, documentation, refactors, research, and maintenance.
+An explicit user instruction can override the current strategy, but the
+override and its rationale MUST be recorded in the document.
 
 ---
 

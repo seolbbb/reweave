@@ -1803,7 +1803,7 @@ select {
     z-index: 10;
     top: 0;
     display: grid;
-    grid-template-columns: 42px repeat(4, 1fr);
+    grid-template-columns: 42px repeat(5, 1fr);
     padding: 8px;
     border-right: 0;
     border-bottom: 1px solid #dfe4ea;
