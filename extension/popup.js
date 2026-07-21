@@ -5,8 +5,8 @@ const save = document.querySelector("#save");
 
 const stateCopy = {
   ready: {
-    title: "Save this ChatGPT conversation",
-    detail: "Reweave is ready. Save the complete conversation to your local library.",
+    title: "Save this conversation",
+    detail: "Open a ChatGPT or Claude conversation, then save it to your local library.",
     save: true,
     retry: false,
   },
@@ -57,14 +57,27 @@ function renderSaveResult(response) {
     return;
   }
 
+  const providerName = response?.provider === "claude" ? "Claude" : "ChatGPT";
   const errorCopy = {
-    unsupported_page: ["Open a ChatGPT conversation", "Save works on an open ChatGPT conversation page."],
-    logged_out: ["Sign in to ChatGPT", "Sign in, open a conversation, then try Save again."],
-    changed_dom: ["ChatGPT page changed", "Reload the conversation and try again."],
-    page_access_failed: ["Could not read this page", "Keep the ChatGPT tab active and try Save again."],
-    malformed_adapter_response: ["Update the extension", "The ChatGPT adapter is incompatible with this extension."],
+    unsupported_page: [
+      "Open a supported conversation",
+      "Save works on an open ChatGPT or Claude conversation page.",
+    ],
+    logged_out: [
+      `Sign in to ${providerName}`,
+      `Sign in to ${providerName}, open a conversation, then try Save again.`,
+    ],
+    changed_dom: [`${providerName} page changed`, "Reload the conversation and try again."],
+    page_access_failed: [
+      "Could not read this page",
+      `Keep the ${providerName} tab active and try Save again.`,
+    ],
+    malformed_adapter_response: [
+      "Update the extension",
+      `The ${providerName} adapter is incompatible with this extension.`,
+    ],
     incomplete_conversation: ["Load the whole conversation", "Scroll to the beginning, let it finish loading, then save again."],
-    invalid_conversation: ["Could not validate this conversation", "Reload the ChatGPT conversation and try again."],
+    invalid_conversation: ["Could not validate this conversation", `Reload the ${providerName} conversation and try again.`],
     capture_too_large: ["Conversation is too large", "This conversation exceeds the safe local transfer limit."],
     invalid_capture: ["Could not validate this conversation", "No archive changes were made. Reload and try again."],
     app_not_running: ["Open Reweave to continue", "Start the desktop app, then save again."],
@@ -98,12 +111,12 @@ function checkAvailability() {
 function saveConversation() {
   document.body.dataset.status = "saving";
   title.textContent = "Saving conversation…";
-  detail.textContent = "Reading the active ChatGPT conversation and storing it locally.";
+  detail.textContent = "Reading the active supported conversation and storing it locally.";
   save.disabled = true;
   save.textContent = "Saving…";
   retry.hidden = true;
 
-  chrome.runtime.sendMessage({ type: "reweave:save-chatgpt" }, (response) => {
+  chrome.runtime.sendMessage({ type: "reweave:save-conversation" }, (response) => {
     if (chrome.runtime.lastError || !response) {
       renderSaveResult({ status: "unavailable", reason: "native_host_unavailable" });
       return;

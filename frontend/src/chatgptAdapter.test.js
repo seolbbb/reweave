@@ -143,8 +143,9 @@ describe("ChatGPT explicit Save adapter", () => {
     expect(calls.tabQueries).toBe(0);
     expect(calls.injections).toHaveLength(0);
 
-    const saved = await sendRuntimeMessage(listener, { type: "reweave:save-chatgpt" });
+    const saved = await sendRuntimeMessage(listener, { type: "reweave:save-conversation" });
     expect(saved.outcome).toBe("created");
+    expect(saved.provider).toBe("chatgpt");
     expect(calls.tabQueries).toBe(1);
     expect(calls.injections).toEqual([
       { target: { tabId: 17 }, files: ["chatgpt-adapter.js"] },
@@ -165,7 +166,7 @@ describe("ChatGPT explicit Save adapter", () => {
     const extraction = runAdapter(fixture("chatgpt_current_conversation.html"));
     const { listener, calls } = loadBackground({ extraction, encoder: OversizedEncoder });
 
-    const result = await sendRuntimeMessage(listener, { type: "reweave:save-chatgpt" });
+    const result = await sendRuntimeMessage(listener, { type: "reweave:save-conversation" });
 
     expect(result).toMatchObject({ status: "error", reason: "capture_too_large" });
     expect(calls.nativeMessages).toHaveLength(0);
