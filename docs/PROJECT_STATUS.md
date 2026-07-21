@@ -6,9 +6,8 @@
 - Working language: English
 - Current phase: PHASE-001
 - State: active
-- Repository state: TASK-001 persistence, extraction, and backend API slices are integrated;
-  the latest verified work adds the Context Home and Explorer frontend slice. Re-observe Git
-  on every resume.
+- Repository state: TASK-001 is complete across persistence, extraction, backend API,
+  Context Home and Explorer, and source-evidence navigation. Re-observe Git on every resume.
 - Current implementation identity: Local archive and search application with a primary
   Context Home and Explorer, onboarding, archive management, optional hybrid search, cited
   Ask Archive, Insight Reports, and a Phase 0 Memory Audit pilot.
@@ -56,22 +55,42 @@ Current code and historical verification show:
   scopes, compact source evidence, source availability, and link/history counts.
 - Context frontend loading, empty, error, and no-items-in-scope states are explicit and the
   Home and Explorer layouts adapt to desktop and 375-pixel mobile widths.
+- Every live Context evidence reference offers an explicit action that opens the supporting
+  conversation around the exact message in the existing conversation drawer.
+- Evidence whose source conversation was removed remains readable as a compact local snapshot
+  without a misleading source action; source-load failures preserve the excerpt and explain
+  the fallback inline.
 
 The preceding list describes current software, not completion of the Context Library product contract.
 
 ## In progress
 
-- TASK-000 and the first approximately two-hour TASK-001 persistence slice are integrated.
-- The second TASK-001 slice completes automatic Conversation Brief and Context Item
-  extraction and normalization from one archived conversation.
-- The third TASK-001 slice completes backend API exposure for starting analysis and reading
-  its Brief, Context Items, scopes, versions, links, and source evidence.
-- The fourth TASK-001 slice completes the minimal Context Home and Explorer frontend over the
-  same linked Brief and Item APIs.
-- The next bounded TASK-001 execution slice is source-evidence navigation from a Context Item
-  to the supporting conversation when available, with compact evidence as the durable fallback.
+- TASK-000 and TASK-001 are integrated and verified.
+- PHASE-001 remains active because the explicit web-chat Save and Use loop and durable
+  automatic batching are not implemented.
+- TASK-002 is next. Its first approximately two-hour slice is the provider-neutral local
+  whole-conversation capture and idempotent persistence contract shared by future ChatGPT and
+  Claude extension adapters.
 
 ## Verification evidence
+
+### Fresh in the TASK-001 source-evidence navigation slice
+
+- Ruff passed across the repository.
+- 127 Python tests passed with one pre-existing Starlette/httpx deprecation warning.
+- 23 frontend tests passed, including live-evidence target validation and retained-source
+  fallback rendering.
+- TypeScript and the Vite production frontend build passed; packaged web assets were rebuilt.
+- Browser checks against an isolated mixed live/deleted-source Context Item confirmed the
+  exact-message drawer, target highlighting, context/all-message controls, close-button focus,
+  Escape dismissal, retained snapshot copy, and inline failure fallback.
+- At 375 by 812 pixels the evidence view had no horizontal overflow, the source action was 44
+  pixels high, reduced-motion mode was active, and page errors and framework overlays were absent.
+- A fresh clean PyInstaller build completed successfully and created
+  `dist/Reweave/Reweave.exe` (17,364,647 bytes).
+- The packaged executable remained running for an isolated 8-second smoke, returned healthy
+  HTTP, exposed the Context Item route, and served a bundle containing both source-open and
+  retained-fallback behavior. The temporary databases and processes were removed.
 
 ### Fresh in the TASK-001 Context Home and Explorer slice
 
@@ -166,29 +185,39 @@ These are historical merge records and were not rerun by the current documentati
 - The accepted Product Spec replaces the historical AI Memory Control Plane and manual Memory Audit direction, but current code still exposes Memory Audit as a standalone surface.
 - The accepted product removes user-facing Ask Archive, but current code still implements and exposes it.
 - Conversation Brief and Context Item persistence, one-conversation automatic extraction,
-  backend analysis/read APIs, Context Home, and Explorer now exist, but source-evidence
-  navigation, durable batching/retry, full Core Self behavior, automatic routing, Knowledge
+  backend analysis/read APIs, Context Home, Explorer, and source-evidence navigation now
+  exist, but durable batching/retry, full Core Self behavior, automatic routing, Knowledge
   Graph, correction learning, and exception Review do not yet exist.
 - A ChatGPT and Claude browser extension with explicit Save to Reweave and Use Reweave actions does not yet exist.
 - Current Insight Reports have not yet been migrated into Conversation Brief and analysis-history behavior.
 - Current archive search has not yet been reframed or connected as Sources / Evidence Search for Context.
-- Current archive backup and removal do not yet satisfy the Context Library's encrypted version backup, compact post-source evidence, and separate derived-context deletion contract.
+- Current archive backup and removal do not yet satisfy the Context Library's encrypted
+  version backup and separate derived-context deletion contract.
 - The README and AGENTS.md project overview correctly describe the software that exists now; they must not claim future Context behavior until it is implemented.
 
 ## Blockers
 
-- None for TASK-001.
+- None for TASK-002.
 - The public v1 scope freeze and encrypted-synchronization timing are intentionally deferred to PHASE-004 and do not block the current phase.
 
 ## Next task
 
-- TASK-001: Implement durable Conversation Brief and Context Item persistence, automatic extraction from one archived conversation, a minimal Context Home and Explorer view, and source-evidence navigation.
-- Current progress: Persistence is integrated, and automatic source-grounded extraction and
-  normalization, backend analysis/read APIs, and the minimal Context Home and Explorer are
-  complete in the latest verified slices. The next bounded execution slice is source-evidence
-  navigation; TASK-001 remains incomplete until that acceptance path passes.
-- Acceptance: From one existing imported ChatGPT or Claude conversation, analysis creates one faithful Conversation Brief and zero or more source-linked Context Items without manual classification; the data survives restart; Context Home and Explorer render it; and an evidence action opens the supporting conversation or compact evidence.
-- Verify: Add targeted Python and frontend tests for persistence, extraction normalization, restart durability, rendering, and evidence navigation; run the repository's full required checks; build current frontend assets; create dist/Reweave/Reweave.exe with the required clean PyInstaller command; and complete the packaged-app manual scenario.
+- TASK-002: Implement the ChatGPT and Claude whole-conversation Save to Reweave extension
+  flow with idempotent update and non-blocking save reminders.
+- Current bounded slice: Define and implement the provider-neutral local capture payload and
+  app endpoint that persist one complete ordered ChatGPT or Claude conversation immediately,
+  without requiring an API key or waiting for analysis. Repeating a save for the same provider
+  conversation updates the existing archive record instead of duplicating it. Extension UI,
+  provider DOM adapters, and reminders remain later TASK-002 slices.
+- Acceptance: Valid ChatGPT- and Claude-shaped capture payloads preserve provider identity,
+  external conversation identity, title, timestamps, roles, message order, and content; a
+  repeated capture updates the same conversation idempotently; invalid or empty payloads fail
+  without partial writes; saved source data is readable after store restart without an LLM key.
+- Verify: Add focused capture-model, persistence, and API tests for both providers, duplicate
+  update, validation failure, restart durability, and no-key operation; run the full repository
+  checks and strict document validator; rebuild the frontend if changed; create
+  `dist/Reweave/Reweave.exe` with the required clean PyInstaller command; and smoke the packaged
+  capture endpoint against an isolated database.
 
 ## Resume checklist
 
