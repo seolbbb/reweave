@@ -120,18 +120,26 @@ Tasks:
     non-blocking prompt plus per-tab `SAVE` badge. Prompt auto-hide, dismissal and re-arming,
     explicit re-Save, unavailable-app retry, navigation and startup clearing, production
     permission minimization, Chrome/Edge packaged flows, and cleanup are verified.
-- [ ] TASK-003: Implement the user-requested Use Reweave flow using the current chat and drafted request, with explicit context insertion and on-request refresh.
+- [x] TASK-003: Implement the user-requested Use Reweave flow using the current chat and drafted request, with explicit context insertion and on-request refresh.
   - First bounded slice complete: The authenticated provider-neutral Context assembly contract
     accepts one bounded ChatGPT or Claude current-chat payload and non-empty draft, applies
     destination-safe scope and sensitivity filtering before deterministic local ranking,
     deduplication, and context-budget assembly, and returns insertion-ready text with compact
     item provenance without persisting the chat or draft.
-  - Next bounded slice: Connect the Chrome and Edge extension to the assembly endpoint through
-    Native Messaging after one explicit Use Reweave action. Normalize the complete current chat
-    and draft with the existing ChatGPT and Claude adapters, conservatively derive allowed
-    destination scope, insert or on-request refresh one bounded Reweave block without duplicating
-    prior items, and do not save the conversation or refresh automatically.
+  - Second bounded slice complete: The permission-minimal Chrome and Edge extension connects to
+    Context assembly through Native Messaging only after explicit Use. ChatGPT and Claude adapters
+    normalize the complete current chat and non-empty draft, canonical signed-in conversation URLs
+    select the private cross-space policy, and unsupported or uncertain destinations fail closed.
+    One bounded identifiable block is inserted before the preserved draft, concurrent edits prevent
+    overwrite, and a later explicit Use replaces the block without automatic refresh or Save. The
+    existing page-lifetime reminder begins after successful Use.
 - [ ] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
+  - Next bounded slice: Persist one local analysis queue entry after a newly created or updated
+    explicit web capture, connect it to the existing source-grounded extraction pipeline, and make
+    pending and failed work restart-readable and explicitly retryable without delaying capture.
+    Verify queue schema, capture-enqueue idempotency, restart, retry, missing-key, provider failure,
+    terminal success, no-key Save, packaged database state, and cleanup before advancing to batching
+    policy, usage estimates, or onboarding changes.
 
 ### PHASE-002 — Personalization, trust, and retrieval hardening
 

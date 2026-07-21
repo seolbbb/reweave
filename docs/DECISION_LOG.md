@@ -224,6 +224,10 @@ The following entries record the current accepted product direction.
 - Options considered: Universal context, strict isolation everywhere, manual scope choice, or inferred trust zones with conservative shared behavior.
 - Decision: Core Self applies safe general preferences broadly; private AI chats may use relevant cross-space context; Work, Client, Shared, and unknown environments use allowed scope only; sensitive inference requires confirmation before external use.
 - Consequences: Scope is inferred and correction is remembered. Risky export warns only when needed. Removing a full source does not cascade to derived Context, which keeps compact evidence and is deleted separately.
+- Implementation evidence: Explicit Use accepts the private cross-space policy only from canonical
+  signed-in ChatGPT and Claude conversation URLs. The local assembler still excludes sensitive,
+  inactive, and irrelevant items; non-private destinations still require concrete allowed scopes,
+  and shared or unknown browser URLs fail before any page read or Context request.
 - Reconsider when: Scope inference causes a disclosure, browser environments cannot be classified safely, or separate deletion creates unacceptable privacy confusion.
 - Supersedes: DEC-002
 - Superseded by: None
@@ -239,6 +243,9 @@ The following entries record the current accepted product direction.
 - Options considered: Passive capture, default automatic injection, one explicit boundary action, or manual export and copy.
 - Decision: Save reads the current whole ChatGPT or Claude conversation only after a click. Use reads the current chat and drafted request only after a click. Context refresh occurs only on request. Unsaved chats receive a non-blocking reminder and extension badge.
 - Consequences: Extension access remains legible; automatic analysis starts after capture; no standalone Ask Reweave is needed.
+- Implementation evidence: The production extension reads a complete current chat and non-empty
+  draft only after Use, inserts one bounded block without submission or Save, refuses to overwrite a
+  concurrently changed draft, and refreshes only after another explicit Use action.
 - Reconsider when: First-party provider integrations offer equal control with less friction or explicit actions prevent natural daily use.
 - Supersedes: DEC-005
 - Superseded by: None
@@ -438,6 +445,9 @@ The following entries record the current accepted product direction.
   streaming and DOM uncertainty, navigation, startup, and app-unavailable behavior. Packaged
   Chrome and Edge flows verified the prompt, badge, dismissal, successful re-Save, failed
   unavailable-app retry without persistence, and complete cleanup against isolated data.
+- TASK-003 implementation evidence: Successful Use starts the same page-lifetime controller from
+  the current provider identity and complete assistant-count baseline. Failed Context assembly or
+  insertion does not start reminder state.
 - Reconsider when: Browser action or injected-script lifetimes change, structural provider DOM
   signals become unreliable, or dogfooding shows that a 30-second quiet interval is too early or
   too late.

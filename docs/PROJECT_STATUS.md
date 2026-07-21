@@ -6,9 +6,9 @@
 - Working language: English
 - Current phase: PHASE-001
 - State: active
-- Repository state: TASK-001 and TASK-002 are complete across the first Context surfaces,
-  explicit web-chat Save, and page-lifetime unsaved reminders. The first TASK-003 Context
-  assembly slice is complete. Re-observe Git on every resume.
+- Repository state: TASK-001, TASK-002, and TASK-003 are complete across the first Context
+  surfaces, explicit web-chat Save, page-lifetime unsaved reminders, and explicit Context use and
+  refresh. Re-observe Git on every resume.
 - Current implementation identity: Local archive and search application with a primary
   Context Home and Explorer, onboarding, archive management, optional hybrid search, cited
   Ask Archive, Insight Reports, and a Phase 0 Memory Audit pilot.
@@ -40,6 +40,8 @@ Current code and historical verification show:
 - An authenticated provider-neutral Context assembly endpoint accepts one bounded ChatGPT or
   Claude current-chat payload and non-empty draft after an explicit bridge request, while
   rejecting unauthenticated, malformed, oversized, unsafe-scope, and unavailable-context cases.
+  Empty allowed scopes mean cross-space retrieval only for a private destination; every
+  non-private destination still requires explicit bounded scopes.
 - Context assembly filters inactive and sensitive items plus destination-unsafe scopes before
   deterministic local relevance ranking, exact-text deduplication, previous-item exclusion, and
   whole-item character budgeting; insertion-ready output includes stable item markers and compact
@@ -79,7 +81,7 @@ Current code and historical verification show:
 - The production Manifest V3 extension uses `nativeMessaging`, `activeTab`, and `scripting`, with
   no provider or localhost host permissions and no persistent content script. It queries and
   injects the matching adapter into the active ChatGPT or Claude tab only after the user invokes
-  Save from the popup or the browser action shortcut.
+  Save or Use from the popup or browser action shortcut.
 - After a successful explicit Save, the same authorized document receives a page-lifetime
   reminder controller. It observes structural provider identity and complete assistant-turn
   counts without reading message text, waits for one new assistant response and 30 seconds of
@@ -98,16 +100,25 @@ Current code and historical verification show:
   identify one supported HTTPS conversation UUID, a signed-in page, stable current DOM markers,
   the complete alternating turn sequence, unique message identities, non-empty content, and
   bounded normalized output.
-- The popup reports created, updated, unchanged, unsupported, logged-out, changed-DOM,
-  incomplete, oversized, invalid, unavailable, and incompatible outcomes with one explicit
-  44-pixel Save action and no passive provider-page read.
+- After explicit Use, both adapters require one complete bounded user-assistant chat and a
+  non-empty bounded draft. The background worker derives private destination trust only from the
+  canonical signed-in conversation URL, sends no scope index to the browser, and rejects unknown,
+  shared, streaming, incomplete, oversized, or changed state before insertion.
+- Successful Context assembly inserts one bounded identifiable block before the preserved draft.
+  The adapter verifies provider identity and an unchanged draft immediately before mutation;
+  another explicit Use replaces the existing block without duplication, automatic refresh,
+  submission, or conversation Save. Successful Use starts the existing page-lifetime reminder.
+- The popup reports Save plus Use, refresh, empty draft, concurrent edit, unavailable Context,
+  unsupported, logged-out, changed-DOM, streaming, incomplete, oversized, invalid, unavailable,
+  and incompatible outcomes with explicit 44-pixel actions and no passive provider-page read.
 - The desktop app publishes an atomic, short-lived runtime descriptor with an ephemeral token,
   protects the loopback availability handshake with that token, and removes only its own
   descriptor during an orderly shutdown.
 - A separately packaged `ReweaveNativeHost.exe` implements bounded native-message framing,
-  reads the private runtime descriptor, probes the authenticated loopback handshake, forwards a
-  bounded sanitized capture to the authenticated app endpoint, and returns only bounded status
-  and capture summaries without exposing the token, port, or raw conversation.
+  reads the private runtime descriptor, probes the authenticated loopback handshake, forwards
+  bounded capture and Context assembly requests to authenticated app endpoints, and returns only
+  bounded status, capture summaries, or validated insertion text without exposing the token,
+  port, current chat, draft, or full Context Item records.
 - Development registration scripts create and remove the exact per-user Chrome and Edge Native
   Messaging registry entries and restrict the host manifest to explicit extension origins.
 
@@ -115,16 +126,38 @@ The preceding list describes current software, not completion of the Context Lib
 
 ## In progress
 
-- TASK-000, TASK-001, and TASK-002 are integrated and verified.
-- PHASE-001 remains active because the extension-side Use insertion loop and durable automatic
-  batching are not implemented.
+- TASK-000, TASK-001, TASK-002, and TASK-003 are integrated and verified.
+- PHASE-001 remains active because durable automatic batching, retry, queue behavior, usage
+  estimates, and the intended backfill recommendation are not implemented.
 - The five TASK-002 slices complete the provider-neutral local capture contract, secure
   Chrome/Edge Native Messaging scaffold, explicit ChatGPT and Claude whole-conversation Save,
   and non-blocking page-lifetime unsaved reminders.
-- TASK-003 remains active. Its first bounded Context assembly and authenticated local endpoint
-  slice is complete; the explicit extension-side Use action and insertion path are next.
+- TASK-004 is next. Its first bounded durable analysis-queue slice has not started.
 
 ## Verification evidence
+
+### Fresh in the TASK-003 explicit Use slice
+
+- Ruff passed across the repository; all 164 Python tests passed with one pre-existing
+  Starlette/httpx deprecation warning; all 54 frontend tests passed; production extension
+  JavaScript syntax, TypeScript, the Vite production frontend build, focused bridge and provider
+  regressions, and `git diff --check` passed.
+- Deterministic ChatGPT and Claude coverage verifies complete current-chat and non-empty draft
+  collection only after Use, private cross-space scope handling, sensitive exclusion, unsupported
+  and unknown-page rejection, streaming, empty, oversized, changed-DOM, concurrent-edit,
+  app-unavailable, malformed-response, insertion, replacement, refresh, no-passive-read, Save,
+  and reminder behavior.
+- A fresh clean PyInstaller build created `dist/Reweave/Reweave.exe` (17,388,856 bytes) and
+  `dist/Reweave/ReweaveNativeHost.exe` (2,234,930 bytes). The packaged app published its
+  authenticated runtime descriptor and served the populated Context assembly path.
+- Chrome for Testing used the packaged app and native host to insert three Context Items into the
+  ChatGPT fixture and refresh them while preserving the draft and one block. Installed Microsoft
+  Edge inserted four items into the Claude fixture with the same refresh and preservation result.
+- After the packaged app stopped, Chrome and Edge each returned `app_not_running` for Use and left
+  the corresponding fixture draft unchanged. The temporary host permission existed only in the
+  isolated automation copy; the production manifest remained permission-minimal.
+- Temporary browser profiles, the automation extension, isolated data, packaged processes, Native
+  Messaging manifests, and Chrome and Edge registry entries were removed after verification.
 
 ### Fresh in the TASK-003 Context assembly slice
 
@@ -400,9 +433,10 @@ These are historical merge records and were not rerun by the current documentati
   exist, but durable batching/retry, full Core Self behavior, automatic routing, Knowledge
   Graph, correction learning, and exception Review do not yet exist.
 - The local whole-conversation capture contract, secure Chrome/Edge extension bridge, ChatGPT and
-  Claude DOM adapters, explicit Save paths, page-lifetime unsaved reminders, and authenticated
-  Context assembly endpoint now exist, but the extension does not yet offer the explicit Use
-  action or insert and refresh assembled Context in the drafted request.
+  Claude DOM adapters, explicit Save and Use paths, page-lifetime unsaved reminders, authenticated
+  Context assembly, and on-request draft insertion and refresh now exist. Destination correction,
+  non-private allowed-scope selection, and sensitive-use confirmation remain later trust work in
+  TASK-007.
 - Current Insight Reports have not yet been migrated into Conversation Brief and analysis-history behavior.
 - Current archive search has not yet been reframed or connected as Sources / Evidence Search for Context.
 - Current archive backup and removal do not yet satisfy the Context Library's encrypted
@@ -411,30 +445,26 @@ These are historical merge records and were not rerun by the current documentati
 
 ## Blockers
 
-- None for TASK-003.
+- None for TASK-004.
 - The public v1 scope freeze and encrypted-synchronization timing are intentionally deferred to PHASE-004 and do not block the current phase.
 
 ## Next task
 
-- TASK-003: Connect one explicit Use Reweave action in the Chrome and Edge extension to the
-  authenticated Context assembly endpoint and insert or refresh the returned Context in the
-  current ChatGPT or Claude draft.
-- Current bounded slice: Extend the existing action-injected provider adapters and Native
-  Messaging bridge to read one complete bounded current chat plus the non-empty draft only after
-  Use is invoked, derive a conservative allowed destination scope, request Context assembly, and
-  insert or replace one identifiable Reweave block without automatically refreshing or saving the
-  conversation. Start the existing page-lifetime unsaved reminder controller after successful Use.
-- Acceptance: No provider-page read occurs before the explicit Use action; ChatGPT and Claude
-  current-chat and draft extraction fails closed for unsupported, logged-out, changed-DOM,
-  streaming, empty, oversized, unavailable-app, and unsafe or unknown destination cases; Native
-  Messaging never exposes the bridge token or port; successful insertion preserves the user's
-  draft, remains within provider input bounds, contains each item at most once, and refreshes only
-  when requested; Save behavior and production permission minimization remain unchanged.
-- Verify: Add deterministic provider, popup/background, Native Messaging, insertion/replacement,
-  refresh, failure-state, scope, no-passive-read, and Save/reminder regression tests; run packaged
-  Chrome and Edge fixture flows for both providers and retry states; run all repository gates and
-  strict document validation; create a fresh clean Windows executable; and clean all temporary
-  browser profiles, registration, packaged processes, and isolated data.
+- TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and
+  onboarding that recommends but does not require export backfill.
+- Current bounded slice: Persist one local analysis queue entry after a newly created or updated
+  explicit web capture, connect it to the existing source-grounded extraction pipeline, and make
+  pending and failed work restart-readable and explicitly retryable without delaying capture.
+- Acceptance: Save completes locally before analysis and still works without a configured key;
+  unchanged repeated captures do not create duplicate work; one source version produces at most
+  one active queue job; pending and failed jobs survive restart; retry uses the current explicit or
+  saved BYOK profile without storing credentials in the queue; terminal success reuses the
+  existing idempotent Brief and Context Item path; and onboarding continues to recommend export
+  backfill without making it a prerequisite.
+- Verify: Add queue schema, capture-enqueue, idempotency, restart, retry, missing-key, provider
+  failure, success, and no-key Save regressions; verify queue/API state against an isolated
+  packaged database; run all repository and strict document gates; create a fresh clean Windows
+  executable and packaged smoke; and remove all temporary processes and data.
 
 ## Resume checklist
 
