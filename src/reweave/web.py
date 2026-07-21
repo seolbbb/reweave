@@ -20,7 +20,11 @@ from pydantic import BaseModel, Field, SecretStr
 from reweave.archive import ArchiveStore, ImportSummary
 from reweave.archive_answers import answer_archive
 from reweave.archive_management import ArchiveManager
-from reweave.context_library import ContextLibraryStore
+from reweave.context_extraction import (
+    ContextExtractionResult,
+    extract_context_from_conversation,
+)
+from reweave.context_library import ContextItem, ContextLibraryStore, ConversationBrief
 from reweave.insights import generate_insight_report
 from reweave.llm import (
     LLMSettings,
@@ -77,6 +81,14 @@ class LLMSettingsRequest(BaseModel):
 class InsightRequest(BaseModel):
     conversation_ids: list[str]
     title: str = "Connected Insights"
+    settings: LLMSettingsRequest
+
+
+class ContextAnalysisRequest(BaseModel):
+    conversation_id: str = Field(min_length=1)
+    analysis_mode: Literal["auto", "project", "learning", "research_writing", "context_handoff"] = (
+        "auto"
+    )
     settings: LLMSettingsRequest
 
 
@@ -181,7 +193,8 @@ def create_app(
     """Create the FastAPI app."""
     app = FastAPI(title="Reweave")
     store = ArchiveStore(db_path)
-    app.state.context_library = ContextLibraryStore(db_path)
+    context_library = ContextLibraryStore(db_path)
+    app.state.context_library = context_library
     archive_manager = ArchiveManager(db_path)
     app_paths = get_app_paths(data_dir)
     profile_store = LLMProfileStore(app_paths.llm_profiles_path)
@@ -198,6 +211,9 @@ def create_app(
     answer_jobs: dict[str, dict[str, Any]] = {}
     answer_jobs_lock = Lock()
     answer_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="reweave-answer")
+    context_jobs: dict[str, dict[str, Any]] = {}
+    context_jobs_lock = Lock()
+    context_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="reweave-context")
 
     def update_insight_job(job_id: str, **changes: Any) -> None:
         with insight_jobs_lock:
@@ -210,6 +226,10 @@ def create_app(
     def update_answer_job(job_id: str, **changes: Any) -> None:
         with answer_jobs_lock:
             answer_jobs[job_id].update(changes)
+
+    def update_context_job(job_id: str, **changes: Any) -> None:
+        with context_jobs_lock:
+            context_jobs[job_id].update(changes)
 
     def run_insight_job(
         job_id: str,
@@ -364,6 +384,47 @@ def create_app(
                 "language": answer.language,
                 "sources": [source.__dict__ for source in answer.sources],
             },
+        )
+
+    def run_context_job(
+        job_id: str,
+        request: ContextAnalysisRequest,
+        settings: LLMSettings,
+        provider: Any,
+    ) -> None:
+        update_context_job(
+            job_id,
+            status="running",
+            stage="analyzing",
+            message="Analyzing the selected conversation",
+            progress=25,
+        )
+        try:
+            result = extract_context_from_conversation(
+                store,
+                context_library,
+                conversation_id=request.conversation_id,
+                settings=settings,
+                analysis_mode=request.analysis_mode,
+                provider=provider,
+            )
+        except Exception as exc:  # Background failures must always reach a terminal state.
+            error = _context_job_error(exc)
+            update_context_job(
+                job_id,
+                status="failed",
+                stage="failed",
+                message=error,
+                error=error,
+            )
+            return
+        update_context_job(
+            job_id,
+            status="completed",
+            stage="complete",
+            message="Conversation context ready",
+            progress=100,
+            result=_context_extraction_result_to_dict(result),
         )
 
     @app.get("/api/health")
@@ -1015,6 +1076,78 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"status": "deleted"}
 
+    @app.post("/api/context/analysis/jobs", status_code=202)
+    def create_context_analysis_job(request: ContextAnalysisRequest) -> dict[str, Any]:
+        if store.get_conversation(request.conversation_id) is None:
+            raise HTTPException(status_code=404, detail="Archived conversation not found.")
+        try:
+            settings, provider = _resolve_llm_settings(request.settings, profile_store)
+        except ProviderConfigurationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        job_id = uuid4().hex
+        job = {
+            "id": job_id,
+            "conversation_id": request.conversation_id,
+            "analysis_mode": request.analysis_mode,
+            "status": "queued",
+            "stage": "queued",
+            "message": "Queued for Context analysis",
+            "progress": 2,
+            "created_at": datetime.now(tz=UTC).isoformat(),
+            "result": None,
+            "error": None,
+        }
+        with context_jobs_lock:
+            context_jobs[job_id] = job
+        response = dict(job)
+        context_executor.submit(run_context_job, job_id, request, settings, provider)
+        return response
+
+    @app.get("/api/context/analysis/jobs/{job_id}")
+    def get_context_analysis_job(job_id: str) -> dict[str, Any]:
+        with context_jobs_lock:
+            job = context_jobs.get(job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail="Context analysis job not found.")
+            return dict(job)
+
+    @app.get("/api/context/briefs")
+    def list_context_briefs(limit: int = 100) -> dict[str, Any]:
+        return {
+            "results": [
+                _context_brief_to_dict(brief) for brief in context_library.list_briefs(limit=limit)
+            ]
+        }
+
+    @app.get("/api/context/briefs/{brief_id}")
+    def get_context_brief(brief_id: str) -> dict[str, Any]:
+        brief = context_library.get_brief(brief_id)
+        if brief is None:
+            raise HTTPException(status_code=404, detail="Conversation Brief not found.")
+        result = _context_brief_to_dict(brief)
+        result["items"] = [
+            _context_item_to_dict(item)
+            for item_id in brief.context_item_ids
+            if (item := context_library.get_item(item_id)) is not None
+        ]
+        return result
+
+    @app.get("/api/context/items")
+    def list_context_items(limit: int = 200) -> dict[str, Any]:
+        return {
+            "results": [
+                _context_item_to_dict(item) for item in context_library.list_items(limit=limit)
+            ]
+        }
+
+    @app.get("/api/context/items/{item_id}")
+    def get_context_item(item_id: str) -> dict[str, Any]:
+        item = context_library.get_item(item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Context Item not found.")
+        return _context_item_to_dict(item)
+
     @app.post("/api/insights")
     def create_insight(request: InsightRequest) -> dict[str, Any]:
         try:
@@ -1210,6 +1343,120 @@ def _conversation_search_result_to_dict(result) -> dict[str, Any]:
     }
 
 
+def _context_brief_to_dict(brief: ConversationBrief) -> dict[str, Any]:
+    return {
+        "id": brief.id,
+        "source_conversation_id": brief.source_conversation_id,
+        "source_record_id": brief.source_record_id,
+        "source_external_id": brief.source_external_id,
+        "source_provider": brief.source_provider,
+        "source_title": brief.source_title,
+        "source_created_at": brief.source_created_at,
+        "main_subject": brief.main_subject,
+        "user_goal": brief.user_goal,
+        "important_outcomes": list(brief.important_outcomes),
+        "decisions": list(brief.decisions),
+        "lessons": list(brief.lessons),
+        "unresolved_questions": list(brief.unresolved_questions),
+        "actions": list(brief.actions),
+        "analysis_mode": brief.analysis_mode,
+        "analysis_version": brief.analysis_version,
+        "prompt_version": brief.prompt_version,
+        "analysis_provider": brief.analysis_provider,
+        "analysis_model": brief.analysis_model,
+        "analysis_status": brief.analysis_status,
+        "created_at": brief.created_at,
+        "updated_at": brief.updated_at,
+        "context_item_ids": list(brief.context_item_ids),
+        "item_count": len(brief.context_item_ids),
+    }
+
+
+def _context_item_to_dict(item: ContextItem) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "canonical_text": item.canonical_text,
+        "item_type": item.item_type,
+        "epistemic_kind": item.epistemic_kind,
+        "confidence": item.confidence,
+        "sensitivity": item.sensitivity,
+        "status": item.status,
+        "current_version": item.current_version,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+        "last_confirmed_at": item.last_confirmed_at,
+        "stale_at": item.stale_at,
+        "scopes": [
+            {
+                "scope_type": scope.scope_type,
+                "scope_key": scope.scope_key,
+                "confidence": scope.confidence,
+                "created_at": scope.created_at,
+            }
+            for scope in item.scopes
+        ],
+        "evidence": [
+            {
+                "id": evidence.id,
+                "source_conversation_id": evidence.source_conversation_id,
+                "source_message_id": evidence.source_message_id,
+                "source_record_id": evidence.source_record_id,
+                "source_external_id": evidence.source_external_id,
+                "source_message_record_id": evidence.source_message_record_id,
+                "source_provider": evidence.source_provider,
+                "source_title": evidence.source_title,
+                "source_message_index": evidence.source_message_index,
+                "source_role": evidence.source_role,
+                "source_timestamp": evidence.source_timestamp,
+                "excerpt": evidence.excerpt,
+                "relationship": evidence.relationship,
+                "source_available": bool(
+                    evidence.source_conversation_id and evidence.source_message_id
+                ),
+                "created_at": evidence.created_at,
+            }
+            for evidence in item.evidence
+        ],
+        "versions": [
+            {
+                "version": version.version,
+                "canonical_text": version.canonical_text,
+                "item_type": version.item_type,
+                "epistemic_kind": version.epistemic_kind,
+                "confidence": version.confidence,
+                "sensitivity": version.sensitivity,
+                "status": version.status,
+                "last_confirmed_at": version.last_confirmed_at,
+                "stale_at": version.stale_at,
+                "change_reason": version.change_reason,
+                "created_at": version.created_at,
+            }
+            for version in item.versions
+        ],
+        "links": [
+            {
+                "source_item_id": link.source_item_id,
+                "target_item_id": link.target_item_id,
+                "relationship": link.relationship,
+                "created_at": link.created_at,
+            }
+            for link in item.links
+        ],
+    }
+
+
+def _context_extraction_result_to_dict(result: ContextExtractionResult) -> dict[str, Any]:
+    return {
+        "brief": _context_brief_to_dict(result.brief),
+        "items": [_context_item_to_dict(item) for item in result.items],
+        "analysis_version": result.analysis_version,
+        "prompt_version": result.prompt_version,
+        "reused_existing": result.reused_existing,
+        "dropped_items": result.dropped_items,
+        "deduplicated_items": result.deduplicated_items,
+    }
+
+
 def _import_summary_to_dict(summary: ImportSummary) -> dict[str, Any]:
     return {
         "parsed_conversations": summary.parsed_conversations,
@@ -1376,3 +1623,18 @@ def _insight_job_error(exc: Exception) -> str:
     if isinstance(exc, httpx.HTTPError):
         return f"The model request failed ({exc.__class__.__name__})."
     return str(exc)
+
+
+def _context_job_error(exc: Exception) -> str:
+    if isinstance(
+        exc,
+        (
+            ProviderConfigurationError,
+            ProviderRequestError,
+            httpx.HTTPError,
+            LookupError,
+            ValueError,
+        ),
+    ):
+        return _insight_job_error(exc)
+    return "Context analysis failed unexpectedly."
