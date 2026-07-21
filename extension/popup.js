@@ -2,23 +2,27 @@ const title = document.querySelector("#title");
 const detail = document.querySelector("#detail");
 const retry = document.querySelector("#retry");
 const save = document.querySelector("#save");
+const useContext = document.querySelector("#use");
 
 const stateCopy = {
   ready: {
-    title: "Save this conversation",
-    detail: "Open a ChatGPT or Claude conversation, then save it to your local library.",
+    title: "Use or save this conversation",
+    detail: "Add relevant local context to your draft, or save the complete conversation.",
+    use: true,
     save: true,
     retry: false,
   },
   unavailable: {
     title: "Open Reweave to continue",
     detail: "Start the desktop app, then retry the connection.",
+    use: false,
     save: false,
     retry: true,
   },
   incompatible: {
     title: "Update Reweave",
     detail: "The app and extension use different bridge versions. Update both, then retry.",
+    use: false,
     save: false,
     retry: true,
   },
@@ -30,6 +34,9 @@ function renderStatus(status) {
   document.body.dataset.status = safeStatus;
   title.textContent = copy.title;
   detail.textContent = copy.detail;
+  useContext.hidden = !copy.use;
+  useContext.disabled = false;
+  useContext.textContent = "Use Reweave context";
   save.hidden = !copy.save;
   save.disabled = false;
   save.textContent = "Save current conversation";
@@ -38,6 +45,7 @@ function renderStatus(status) {
 
 function renderSaveResult(response) {
   retry.hidden = true;
+  useContext.hidden = false;
   save.hidden = false;
   save.disabled = false;
   save.textContent = "Save again";
@@ -92,10 +100,63 @@ function renderSaveResult(response) {
   detail.textContent = copy[1];
 }
 
+function renderContextResult(response) {
+  retry.hidden = true;
+  useContext.hidden = false;
+  useContext.disabled = false;
+  useContext.textContent = "Refresh Reweave context";
+  save.hidden = false;
+  save.disabled = false;
+
+  if (response?.status === "inserted") {
+    document.body.dataset.status = "saved";
+    title.textContent = "Context added to your draft";
+    detail.textContent = response.item_count === 1
+      ? "One relevant Context Item was added. Review the draft before sending."
+      : `${response.item_count} relevant Context Items were added. Review the draft before sending.`;
+    return;
+  }
+
+  const providerName = response?.provider === "claude" ? "Claude" : "ChatGPT";
+  const errorCopy = {
+    unsupported_page: [
+      "Open a supported conversation",
+      "Use works on a private, signed-in ChatGPT or Claude conversation page.",
+    ],
+    logged_out: [`Sign in to ${providerName}`, `Sign in to ${providerName}, then try Use again.`],
+    changed_dom: [`${providerName} page changed`, "Reload the conversation and try again."],
+    streaming: ["Wait for the response", "Let the current response finish, then try Use again."],
+    incomplete_conversation: [
+      "Load the whole conversation",
+      "Load the complete conversation and wait for the latest response, then try again.",
+    ],
+    empty_draft: ["Write a request first", "Add a non-empty draft, then choose Use Reweave context."],
+    draft_too_large: ["Draft is too large", "Shorten the draft or existing Context block, then try again."],
+    draft_changed: ["Draft changed safely", "Reweave did not overwrite your edits. Choose Use again."],
+    context_unavailable: ["No relevant Context found", "Your draft is unchanged. Try a more specific request."],
+    context_request_too_large: ["Conversation is too large", "This chat exceeds the safe local transfer limit."],
+    invalid_context: ["Could not assemble Context", "Your draft is unchanged. Reload and try again."],
+    insertion_failed: ["Could not update the draft", "Your draft is unchanged. Reload and try again."],
+    app_not_running: ["Open Reweave to continue", "Start the desktop app, then try Use again."],
+    connection_failed: ["Reconnect to Reweave", "Keep the desktop app open, then try Use again."],
+    native_host_unavailable: ["Reconnect to Reweave", "Start Reweave and confirm the extension is installed correctly."],
+    protocol_mismatch: ["Update Reweave", "Update the app and extension, then try again."],
+    malformed_response: ["Update Reweave", "The app returned an incompatible response."],
+  };
+  const copy = errorCopy[response?.reason] || [
+    "Could not add Context",
+    "Your draft is unchanged. Try again.",
+  ];
+  document.body.dataset.status = response?.status === "incompatible" ? "incompatible" : "error";
+  title.textContent = copy[0];
+  detail.textContent = copy[1];
+}
+
 function checkAvailability() {
   document.body.removeAttribute("data-status");
   title.textContent = "Checking Reweave…";
   detail.textContent = "Confirming that the local app is available.";
+  useContext.hidden = true;
   save.hidden = true;
   retry.hidden = true;
 
@@ -114,6 +175,7 @@ function saveConversation() {
   detail.textContent = "Reading the active supported conversation and storing it locally.";
   save.disabled = true;
   save.textContent = "Saving…";
+  useContext.hidden = true;
   retry.hidden = true;
 
   chrome.runtime.sendMessage({ type: "reweave:save-conversation" }, (response) => {
@@ -125,6 +187,25 @@ function saveConversation() {
   });
 }
 
+function useReweave() {
+  document.body.dataset.status = "saving";
+  title.textContent = "Adding Reweave context…";
+  detail.textContent = "Reading the active conversation and draft after your explicit request.";
+  useContext.disabled = true;
+  useContext.textContent = "Adding Context…";
+  save.hidden = true;
+  retry.hidden = true;
+
+  chrome.runtime.sendMessage({ type: "reweave:use-context" }, (response) => {
+    if (chrome.runtime.lastError || !response) {
+      renderContextResult({ status: "unavailable", reason: "native_host_unavailable" });
+      return;
+    }
+    renderContextResult(response);
+  });
+}
+
 retry.addEventListener("click", checkAvailability);
 save.addEventListener("click", saveConversation);
+useContext.addEventListener("click", useReweave);
 checkAvailability();

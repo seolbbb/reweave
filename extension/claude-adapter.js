@@ -1,5 +1,8 @@
 (() => {
   const conversationIdPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+  const reweaveBlockPattern = /<reweave_context>[\s\S]*?<\/reweave_context>/gi;
+  const maxDraftChars = 20_000;
+  const maxComposerChars = 28_000;
   const userSelectors = [
     '[data-testid="user-message"]',
     ".font-user-message",
@@ -274,9 +277,145 @@
     };
   }
 
+  function composerElement() {
+    const selectors = [
+      '[data-testid="composer-input"]',
+      '[data-testid*="composer"] [contenteditable="true"]',
+      'form textarea',
+      'form [contenteditable="true"]',
+      'footer textarea',
+      'footer [contenteditable="true"]',
+    ];
+    const matches = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+    const usable = [...new Set(matches)].filter(
+      (node) =>
+        !node.hasAttribute("hidden") &&
+        node.getAttribute("aria-hidden") !== "true" &&
+        node.getAttribute("aria-disabled") !== "true" &&
+        !node.disabled,
+    );
+    return usable.length === 1 ? usable[0] : null;
+  }
+
+  function composerText(node) {
+    const raw = typeof node.value === "string"
+      ? node.value
+      : typeof node.innerText === "string"
+        ? node.innerText
+        : node.textContent;
+    return (raw || "").replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ");
+  }
+
+  function draftWithoutContext(value) {
+    return value
+      .replace(reweaveBlockPattern, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  function collectContextRequest() {
+    const captureResult = captureConversation();
+    if (!captureResult.ok) {
+      return captureResult;
+    }
+    const messages = captureResult.capture.messages.map(({ role, content }) => ({ role, content }));
+    if (
+      messages.length > 500 ||
+      messages.some(
+        (message, index) =>
+          !["user", "assistant"].includes(message.role) ||
+          message.role !== (index % 2 === 0 ? "user" : "assistant"),
+      ) ||
+      messages.at(-1)?.role !== "assistant"
+    ) {
+      return failure("incomplete_conversation");
+    }
+
+    const composer = composerElement();
+    if (!composer) {
+      return failure("changed_dom");
+    }
+    const expectedDraft = composerText(composer);
+    const draft = draftWithoutContext(expectedDraft);
+    if (!draft) {
+      return failure("empty_draft");
+    }
+    if (draft.length > maxDraftChars || expectedDraft.length > maxComposerChars) {
+      return failure("draft_too_large");
+    }
+    return {
+      ok: true,
+      adapter_version: 1,
+      provider: "claude",
+      external_id: captureResult.capture.external_id,
+      messages,
+      draft,
+      expected_draft: expectedDraft,
+      assistant_count: messages.filter((message) => message.role === "assistant").length,
+    };
+  }
+
+  function setComposerText(node, value) {
+    if (typeof node.value === "string") {
+      const prototype = Object.getPrototypeOf(node);
+      const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+      if (setter) {
+        setter.call(node, value);
+      } else {
+        node.value = value;
+      }
+    } else {
+      node.textContent = value;
+    }
+    const InputEventConstructor = globalThis.InputEvent || globalThis.Event;
+    node.dispatchEvent(
+      new InputEventConstructor("input", {
+        bubbles: true,
+        composed: true,
+        inputType: "insertText",
+        data: value,
+      }),
+    );
+  }
+
+  function insertContext(insertionText, expectedDraft, expectedExternalId) {
+    if (
+      typeof insertionText !== "string" ||
+      !/^<reweave_context>[\s\S]*<\/reweave_context>$/.test(insertionText) ||
+      insertionText.length > 20_000 ||
+      typeof expectedDraft !== "string" ||
+      conversationIdFromLocation() !== expectedExternalId
+    ) {
+      return failure("invalid_context");
+    }
+    const composer = composerElement();
+    if (!composer) {
+      return failure("changed_dom");
+    }
+    if (composerText(composer) !== expectedDraft) {
+      return failure("draft_changed");
+    }
+    const draft = draftWithoutContext(expectedDraft);
+    if (!draft) {
+      return failure("empty_draft");
+    }
+    const nextValue = `${insertionText}\n\n${draft}`;
+    if (nextValue.length > maxComposerChars) {
+      return failure("draft_too_large");
+    }
+    setComposerText(composer, nextValue);
+    const insertedValue = typeof composer.value === "string" ? composer.value : composer.textContent;
+    return insertedValue === nextValue
+      ? { ok: true, context_chars: insertionText.length }
+      : failure("insertion_failed");
+  }
+
   globalThis.__reweaveProviderAdapter = Object.freeze({
     provider: "claude",
     capture: captureConversation,
+    collectContextRequest,
+    insertContext,
     snapshot: reminderSnapshot,
   });
 

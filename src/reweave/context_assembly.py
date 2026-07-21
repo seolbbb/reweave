@@ -6,7 +6,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
-from reweave.context_library import ContextItem, ContextLibraryStore
+from reweave.context_library import ContextItem, ContextLibraryStore, ContextScope
 
 REWEAVE_BLOCK_PATTERN = re.compile(
     r"<reweave_context>.*?</reweave_context>", re.IGNORECASE | re.DOTALL
@@ -121,7 +121,7 @@ def assemble_context(
             continue
         if item.id.casefold() in previously_supplied:
             continue
-        score = _relevance_score(item, query_weights, allowed_scopes)
+        score = _relevance_score(item, query_weights, request.destination, allowed_scopes)
         if score <= 0:
             continue
         ranked.append((score, item))
@@ -142,7 +142,7 @@ def assemble_context(
     selected: list[AssembledContextItem] = []
     rendered_items: list[str] = []
     for score, item in ranked:
-        assembled = _to_assembled_item(item, score, allowed_scopes)
+        assembled = _to_assembled_item(item, score, request.destination, allowed_scopes)
         rendered = _render_item(assembled)
         candidate_text = HEADER + "\n\n".join([*rendered_items, rendered]) + "\n" + FOOTER
         if len(candidate_text) > request.max_context_chars:
@@ -192,8 +192,8 @@ def _validate_request(request: ContextAssemblyInput) -> None:
     allowed_types = DESTINATION_SCOPE_TYPES.get(request.destination)
     if allowed_types is None:
         raise ValueError("Destination must be private, work, client, or shared.")
-    if not request.allowed_scopes:
-        raise ValueError("At least one allowed Context scope is required.")
+    if not request.allowed_scopes and request.destination != "private":
+        raise ValueError("Non-private destinations require an explicit allowed Context scope.")
     scope_keys = [(scope.scope_type, scope.scope_key) for scope in request.allowed_scopes]
     if len(scope_keys) != len(set(scope_keys)) or len(scope_keys) > 25:
         raise ValueError("Allowed Context scopes must be unique and bounded.")
@@ -213,7 +213,7 @@ def _validate_request(request: ContextAssemblyInput) -> None:
 
 def _query_weights(request: ContextAssemblyInput) -> Counter[str]:
     weights: Counter[str] = Counter()
-    for term in _terms(request.draft):
+    for term in _terms(_strip_reweave_blocks(request.draft)):
         weights[term] += 3
     for message in request.messages:
         for term in _terms(_strip_reweave_blocks(message.content)):
@@ -249,22 +249,39 @@ def _is_allowed(
     if item.status != "active" or item.sensitivity != "normal":
         return False
     safe_scope_types = DESTINATION_SCOPE_TYPES[destination]
-    return any(
-        scope.scope_type in safe_scope_types
-        and (scope.scope_type, scope.scope_key) in allowed_scopes
+    return bool(_matching_scopes(item, destination, safe_scope_types, allowed_scopes))
+
+
+def _matching_scopes(
+    item: ContextItem,
+    destination: str,
+    safe_scope_types: set[str],
+    allowed_scopes: set[tuple[str, str]],
+) -> tuple[ContextScope, ...]:
+    private_cross_space = destination == "private" and not allowed_scopes
+    return tuple(
+        scope
         for scope in item.scopes
+        if scope.scope_type in safe_scope_types
+        and (private_cross_space or (scope.scope_type, scope.scope_key) in allowed_scopes)
     )
 
 
 def _relevance_score(
     item: ContextItem,
     query_weights: Counter[str],
+    destination: str,
     allowed_scopes: set[tuple[str, str]],
 ) -> float:
+    matching_scopes = _matching_scopes(
+        item,
+        destination,
+        DESTINATION_SCOPE_TYPES[destination],
+        allowed_scopes,
+    )
     candidate_terms = Counter(_terms(item.canonical_text))
-    for scope in item.scopes:
-        if (scope.scope_type, scope.scope_key) in allowed_scopes:
-            candidate_terms.update(_terms(scope.scope_key))
+    for scope in matching_scopes:
+        candidate_terms.update(_terms(scope.scope_key))
     overlap = sum(
         query_weights[term] * min(count, 2)
         for term, count in candidate_terms.items()
@@ -273,9 +290,7 @@ def _relevance_score(
     if overlap == 0:
         return 0.0
     matching_scope_confidence = max(
-        scope.confidence
-        for scope in item.scopes
-        if (scope.scope_type, scope.scope_key) in allowed_scopes
+        scope.confidence for scope in matching_scopes
     )
     return round(
         float(overlap)
@@ -289,13 +304,19 @@ def _relevance_score(
 def _to_assembled_item(
     item: ContextItem,
     score: float,
+    destination: str,
     allowed_scopes: set[tuple[str, str]],
 ) -> AssembledContextItem:
     evidence = item.evidence[0]
+    matching_scopes = _matching_scopes(
+        item,
+        destination,
+        DESTINATION_SCOPE_TYPES[destination],
+        allowed_scopes,
+    )
     scope_labels = tuple(
         _scope_label(scope.scope_type, scope.scope_key)
-        for scope in item.scopes
-        if (scope.scope_type, scope.scope_key) in allowed_scopes
+        for scope in matching_scopes
     )
     return AssembledContextItem(
         item_id=item.id,
