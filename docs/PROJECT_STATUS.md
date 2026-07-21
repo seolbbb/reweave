@@ -6,9 +6,8 @@
 - Working language: English
 - Current phase: PHASE-001
 - State: active
-- Repository state: codex/task-001-context-persistence contains the TASK-000 canonical-record
-  migration and the verified TASK-001 persistence foundation, pending integration through
-  `dev` into `main`; re-observe Git on every resume.
+- Repository state: TASK-001 persistence is integrated through PR 12 and main commit e75fe0d;
+  the latest verified work adds the extraction slice. Re-observe Git on every resume.
 - Current implementation identity: Local archive and search application with onboarding, archive management, optional hybrid search, cited Ask Archive, Insight Reports, and a Phase 0 Memory Audit pilot.
 - Intended product identity: Linked Context Library and explicit web-chat Context layer defined in PRODUCT_SPEC.md.
 
@@ -33,19 +32,41 @@ Current code and historical verification show:
   Context when an original conversation is removed.
 - Idempotent Brief persistence by source and analysis version, plus app-startup Context
   schema initialization.
+- A dedicated source-grounded extraction pipeline that creates one required Conversation
+  Brief and zero or more supported Context Items through the configured BYOK provider.
+- Versioned Auto, Project, Learning, Research/Writing, and Context Handoff prompts that treat
+  archived conversation content as untrusted data and require exact source excerpts.
+- Conservative normalization for epistemic kind, scope, confidence, sensitivity, evidence,
+  duplicate items, interrupted analysis, and changed source conversations.
 
 The preceding list describes current software, not completion of the Context Library product contract.
 
 ## In progress
 
-- TASK-000 completed the four-document canonical record on the current feature branch.
-- The first approximately two-hour slice of TASK-001 completed the durable persistence
-  foundation on the current feature branch.
-- The next TASK-001 execution slice is automatic Conversation Brief and Context Item
-  extraction and normalization from one archived conversation. API exposure, Context Home,
-  Explorer, and evidence navigation remain later slices of the same task.
+- TASK-000 and the first approximately two-hour TASK-001 persistence slice are integrated.
+- The second TASK-001 slice completes automatic Conversation Brief and Context Item
+  extraction and normalization from one archived conversation.
+- The next bounded TASK-001 execution slice is backend API exposure for starting analysis and
+  reading its Brief and Context Items. Context Home, Explorer, and evidence navigation remain
+  later slices of the same task.
 
 ## Verification evidence
+
+### Fresh in the TASK-001 extraction slice
+
+- 14 focused persistence and extraction tests passed, covering restart durability, schema-v1
+  migration, exact-evidence enforcement, prompt-injection boundaries, conservative labels,
+  zero-item Briefs, duplicate merging, interrupted retry, idempotent reuse, and changed-source
+  reanalysis.
+- Ruff passed across the repository.
+- 124 Python tests passed with one pre-existing Starlette/httpx deprecation warning.
+- 19 frontend tests passed.
+- TypeScript and the Vite production frontend build passed; packaged web assets were rebuilt.
+- A fresh clean PyInstaller build completed successfully and created
+  `dist/Reweave/Reweave.exe` (17,345,691 bytes).
+- The packaged executable remained running for an isolated 8-second startup smoke and was
+  then stopped; its isolated database reported `context_schema_version=3` with no foreign-key
+  violations.
 
 ### Fresh in the TASK-001 persistence slice
 
@@ -91,9 +112,10 @@ These are historical merge records and were not rerun by the current documentati
 
 - The accepted Product Spec replaces the historical AI Memory Control Plane and manual Memory Audit direction, but current code still exposes Memory Audit as a standalone surface.
 - The accepted product removes user-facing Ask Archive, but current code still implements and exposes it.
-- Conversation Brief and Context Item persistence now exists, but automatic extraction, API
-  exposure, Core Self behavior, automatic routing, Context Home, Explorer, Knowledge Graph,
-  correction learning, and exception Review do not yet exist.
+- Conversation Brief and Context Item persistence and one-conversation automatic extraction
+  now exist, but API exposure, durable batching/retry, Core Self behavior, automatic routing,
+  Context Home, Explorer, Knowledge Graph, correction learning, and exception Review do not
+  yet exist.
 - A ChatGPT and Claude browser extension with explicit Save to Reweave and Use Reweave actions does not yet exist.
 - Current Insight Reports have not yet been migrated into Conversation Brief and analysis-history behavior.
 - Current archive search has not yet been reframed or connected as Sources / Evidence Search for Context.
@@ -108,8 +130,9 @@ These are historical merge records and were not rerun by the current documentati
 ## Next task
 
 - TASK-001: Implement durable Conversation Brief and Context Item persistence, automatic extraction from one archived conversation, a minimal Context Home and Explorer view, and source-evidence navigation.
-- Current progress: Persistence is complete on the current feature branch. The next bounded execution
-  slice is automatic extraction and normalization; TASK-001 remains incomplete until its API,
+- Current progress: Persistence is integrated, and automatic source-grounded extraction and
+  normalization are complete in the latest verified slice. The next bounded execution slice
+  is backend API analysis and result exposure; TASK-001 remains incomplete until its API,
   Context Home, Explorer, and evidence-navigation acceptance paths pass.
 - Acceptance: From one existing imported ChatGPT or Claude conversation, analysis creates one faithful Conversation Brief and zero or more source-linked Context Items without manual classification; the data survives restart; Context Home and Explorer render it; and an evidence action opens the supporting conversation or compact evidence.
 - Verify: Add targeted Python and frontend tests for persistence, extraction normalization, restart durability, rendering, and evidence navigation; run the repository's full required checks; build current frontend assets; create dist/Reweave/Reweave.exe with the required clean PyInstaller command; and complete the packaged-app manual scenario.
