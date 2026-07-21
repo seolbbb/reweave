@@ -578,11 +578,15 @@ export function Workspace() {
   }
 
   async function openDetail(id: string, messageIndex: number | null = null) {
+    setDetail(null);
     setDetailMessageIndex(messageIndex);
     try {
       setDetail(await api<ConversationDetail>(`/api/conversations/${id}`));
+      return true;
     } catch (error) {
       setStatus(messageFrom(error, "Could not open the conversation."));
+      setDetailMessageIndex(null);
+      return false;
     }
   }
 
@@ -882,7 +886,24 @@ export function Workspace() {
         onNavigate={switchView}
       />
       {activeView === "context" && (
-        <ContextWorkspace onOpenLibrary={() => setActiveView("library")} />
+        <>
+          <ContextWorkspace
+            onOpenLibrary={() => setActiveView("library")}
+            onOpenEvidence={(conversationId, messageIndex) => openDetail(conversationId, messageIndex)}
+          />
+          {detail && (
+            <div className="libraryDrawerBackdrop" role="presentation" onClick={() => setDetail(null)}>
+              <aside className="libraryDrawerPanel" onClick={(event) => event.stopPropagation()}>
+                <ConversationDrawer
+                  detail={detail}
+                  close={() => setDetail(null)}
+                  targetIndex={detailMessageIndex}
+                  label={detailMessageIndex === null ? "Context evidence" : `Context evidence · message #${detailMessageIndex}`}
+                />
+              </aside>
+            </div>
+          )}
+        </>
       )}
       {activeView === "library" && (
         <>
@@ -1610,6 +1631,14 @@ function ConversationDrawer({
     });
   }, [detail.conversation.id, targetIndex, viewMode]);
 
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") close();
+    }
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [close]);
+
   function jumpToTarget() {
     if (targetIndex === null) return;
     if (viewMode !== "all") {
@@ -1629,7 +1658,7 @@ function ConversationDrawer({
             {detail.conversation.source} / {detail.conversation.raw_message_count} messages / {formatDate(detail.conversation.created_at)}
           </p>
         </div>
-        <button type="button" onClick={close} aria-label="Close conversation drawer"><X size={17} /></button>
+        <button type="button" onClick={close} aria-label="Close conversation drawer" autoFocus><X size={17} /></button>
       </header>
       {canShowContext && (
         <div className="drawerControls" role="group" aria-label="Conversation view">
