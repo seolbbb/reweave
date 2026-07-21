@@ -65,16 +65,26 @@ Current code and historical verification show:
   non-empty content, duplicate IDs, unknown fields, and bounded payload size.
 - `POST /api/capture/conversations` persists valid captures immediately without an LLM key,
   reuses the archive's transactional import, FTS, and embedding-invalidation path, and reports
-  created, updated, or unchanged outcomes without returning raw conversation content.
-- A permission-minimal Manifest V3 extension scaffold loads unpacked in Chrome and Edge with
-  only `nativeMessaging`; it has no provider or localhost host permissions, content scripts,
-  or provider page-reading code in this slice.
+  created, updated, or unchanged outcomes without returning raw conversation content. Explicit
+  web captures use stable provider identity rather than the import path's timestamp fallback, so
+  distinct conversations with the same creation time cannot overwrite one another.
+- The production Manifest V3 extension uses `nativeMessaging`, `activeTab`, and `scripting`, with
+  no provider or localhost host permissions and no persistent content script. It queries and
+  injects into the active ChatGPT tab only after the user invokes Save from the popup or the
+  browser action shortcut.
+- The ChatGPT adapter fails closed unless it can identify one supported HTTPS conversation URL,
+  a signed-in page, consecutive complete conversation turns, a user-authored first turn, unique
+  message identities, non-empty content, and bounded normalized output.
+- The popup reports created, updated, unchanged, unsupported, logged-out, changed-DOM,
+  incomplete, oversized, invalid, unavailable, and incompatible outcomes with one explicit
+  44-pixel Save action and no passive provider-page read.
 - The desktop app publishes an atomic, short-lived runtime descriptor with an ephemeral token,
   protects the loopback availability handshake with that token, and removes only its own
   descriptor during an orderly shutdown.
 - A separately packaged `ReweaveNativeHost.exe` implements bounded native-message framing,
-  reads the private runtime descriptor, probes the authenticated loopback handshake, and returns
-  only ready, unavailable, incompatible, or malformed status without exposing the token or port.
+  reads the private runtime descriptor, probes the authenticated loopback handshake, forwards a
+  bounded sanitized capture to the authenticated app endpoint, and returns only bounded status
+  and capture summaries without exposing the token, port, or raw conversation.
 - Development registration scripts create and remove the exact per-user Chrome and Edge Native
   Messaging registry entries and restrict the host manifest to explicit extension origins.
 
@@ -85,12 +95,43 @@ The preceding list describes current software, not completion of the Context Lib
 - TASK-000 and TASK-001 are integrated and verified.
 - PHASE-001 remains active because the explicit web-chat Save and Use loop and durable
   automatic batching are not implemented.
-- The first two TASK-002 slices complete the provider-neutral local capture contract and the
-  secure Chrome/Edge Native Messaging scaffold and availability handshake.
-- The next bounded TASK-002 slice is the explicit ChatGPT whole-conversation Save path; the
-  Claude adapter and non-blocking unsaved reminder follow after it.
+- The first three TASK-002 slices complete the provider-neutral local capture contract, the
+  secure Chrome/Edge Native Messaging scaffold, and explicit ChatGPT whole-conversation Save.
+- The next bounded TASK-002 slice is the explicit Claude whole-conversation Save path; the
+  non-blocking unsaved reminder follows after it.
 
 ## Verification evidence
+
+### Fresh in the TASK-002 explicit ChatGPT Save slice
+
+- Ruff passed across the repository; 151 Python tests passed with one pre-existing
+  Starlette/httpx deprecation warning; 28 frontend tests passed; extension JavaScript syntax,
+  TypeScript, and the Vite production frontend build passed.
+- Fixture and boundary coverage confirms current ChatGPT normalization, logged-out and
+  changed-DOM rejection, incomplete-turn rejection, no tab query or injection before Save,
+  production permission minimization, bounded Native Messaging forwarding, actionable errors,
+  invalid-payload atomicity, and distinct same-time conversation identity.
+- The production manifest has no provider host permission or persistent content script. The
+  browser fixture harness temporarily granted only `https://chatgpt.com/*` because a
+  programmatically invoked popup button does not confer `activeTab`; the shipped extension code
+  and manifest were otherwise unchanged.
+- Chrome for Testing and the installed Microsoft Edge each saved a different fixture
+  conversation through the packaged native host and app, then reported `Already up to date` on
+  the identical repeat. The isolated archive contained exactly two conversations and four
+  ordered messages. A changed-DOM fixture failed before persistence.
+- Both browser popup checks showed a 44-pixel primary action and no horizontal overflow. The
+  installed Chrome executable launched after Cold Turkey was disabled, but its current automated
+  launch mode did not load an unpacked extension; Chrome for Testing supplied the equivalent
+  Chromium extension scenario without using the user's browser profile.
+- A fresh clean PyInstaller build completed successfully and created
+  `dist/Reweave/Reweave.exe` (17,374,427 bytes) and
+  `dist/Reweave/ReweaveNativeHost.exe` (2,233,179 bytes).
+- The final packaged native host rejected an invalid capture as `invalid_capture`, emitted no
+  stderr or trailing stdout bytes, and left the isolated archive unchanged at two conversations
+  and four messages.
+- `npm audit` still reports one low-severity development-server advisory in Vite's existing
+  esbuild dependency; no production server exposure or moderate, high, or critical advisory was
+  introduced in this slice.
 
 ### Fresh in the TASK-002 Native Messaging scaffold slice
 
@@ -246,9 +287,9 @@ These are historical merge records and were not rerun by the current documentati
   backend analysis/read APIs, Context Home, Explorer, and source-evidence navigation now
   exist, but durable batching/retry, full Core Self behavior, automatic routing, Knowledge
   Graph, correction learning, and exception Review do not yet exist.
-- The local whole-conversation capture contract and secure Chrome/Edge extension availability
-  scaffold now exist, but ChatGPT and Claude DOM adapters, explicit Save and Use actions, and
-  non-blocking reminders do not yet exist.
+- The local whole-conversation capture contract, secure Chrome/Edge extension bridge, ChatGPT DOM
+  adapter, and explicit ChatGPT Save now exist, but the Claude DOM adapter, explicit Save and Use
+  actions for the remaining paths, and non-blocking reminders do not yet exist.
 - Current Insight Reports have not yet been migrated into Conversation Brief and analysis-history behavior.
 - Current archive search has not yet been reframed or connected as Sources / Evidence Search for Context.
 - Current archive backup and removal do not yet satisfy the Context Library's encrypted
@@ -264,18 +305,18 @@ These are historical merge records and were not rerun by the current documentati
 
 - TASK-002: Implement the ChatGPT and Claude whole-conversation Save to Reweave extension
   flow with idempotent update and non-blocking save reminders.
-- Current bounded slice: Implement an explicit ChatGPT whole-conversation Save action using the
-  existing Native Messaging boundary. Read the active ChatGPT page only after the user clicks
-  Save; normalize and send the complete ordered conversation through the packaged native host
-  to the existing capture contract. Claude support and the unsaved reminder remain later slices.
-- Acceptance: On a supported ChatGPT conversation, one explicit Save stores the whole current
+- Current bounded slice: Implement an explicit Claude whole-conversation Save action using the
+  existing action-triggered page-access and Native Messaging boundaries. Reuse provider-neutral
+  capture and popup outcome handling without changing the verified ChatGPT path. The unsaved
+  reminder remains a later TASK-002 slice.
+- Acceptance: On a supported Claude conversation, one explicit Save stores the whole current
   conversation and reports created, updated, or unchanged; repeated Save is idempotent; no
-  provider page is read before the click; unsupported, logged-out, changed-DOM, unavailable-app,
-  oversized, and invalid-conversation states are actionable and cause no partial archive write;
-  permissions remain limited to the smallest action-triggered ChatGPT access required.
-- Verify: Add fixture-based ChatGPT adapter and normalization tests, action-gating and permission
-  checks, native-host capture forwarding and size/error tests, full repository gates and strict
-  document validation, a fresh clean Windows executable build, unpacked Chrome and Edge Save
+  provider page is read before the click; unsupported, logged-out, changed-DOM, incomplete,
+  unavailable-app, oversized, and invalid-conversation states are actionable and cause no partial
+  archive write; ChatGPT Save behavior and permission minimization remain unchanged.
+- Verify: Add fixture-based Claude adapter and normalization tests, shared action-gating and
+  permission regressions, native-host forwarding regressions, full repository gates and strict
+  document validation, a fresh clean Windows executable build, Chrome and Edge Claude Save
   scenarios, and packaged created/unchanged/invalid capture smokes against isolated data.
 
 ## Resume checklist

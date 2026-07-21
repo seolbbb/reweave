@@ -103,6 +103,32 @@ def test_repeated_capture_updates_in_place_then_becomes_unchanged(tmp_path):
     assert reopened.search("Append one more ordered message")[0].conversation_id == conversation.id
 
 
+def test_distinct_capture_ids_do_not_merge_when_created_at_matches(tmp_path):
+    db_path = tmp_path / "archive.db"
+    client = TestClient(create_app(db_path, data_dir=tmp_path / "app-data"))
+    first_payload = _payload("chatgpt")
+    second_payload = _payload("chatgpt")
+    second_payload["external_id"] = "chatgpt-conversation-43"
+    second_payload["title"] = "A distinct ChatGPT capture"
+    second_payload["messages"][0]["external_id"] = "chatgpt-43-message-1"
+    second_payload["messages"][1]["external_id"] = "chatgpt-43-message-2"
+
+    first = client.post("/api/capture/conversations", json=first_payload)
+    second = client.post("/api/capture/conversations", json=second_payload)
+    repeated = client.post("/api/capture/conversations", json=second_payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert repeated.status_code == 200
+    assert first.json()["outcome"] == "created"
+    assert second.json()["outcome"] == "created"
+    assert repeated.json()["outcome"] == "unchanged"
+    assert first.json()["conversation_id"] != second.json()["conversation_id"]
+    stats = ArchiveStore(db_path).stats()
+    assert stats.total_conversations == 2
+    assert stats.total_messages == 4
+
+
 def test_invalid_capture_is_rejected_without_partial_archive_writes(tmp_path):
     db_path = tmp_path / "archive.db"
     client = TestClient(create_app(db_path, data_dir=tmp_path / "app-data"))
@@ -132,3 +158,44 @@ def test_capture_model_rejects_duplicate_message_identity_and_naive_time():
     naive_time["created_at"] = "2026-07-21T09:00:00"
     with pytest.raises(ValidationError, match="timezone offset"):
         ConversationCapture.model_validate(naive_time)
+
+
+def test_capture_allows_unknown_conversation_time_without_inventing_one():
+    payload = _payload()
+    payload["created_at"] = None
+    payload["updated_at"] = None
+    payload["messages"][0]["timestamp"] = None
+    payload["messages"][1]["timestamp"] = None
+
+    normalized = ConversationCapture.model_validate(payload).to_normalized()
+
+    assert normalized.created_at == ""
+    assert normalized.updated_at is None
+
+
+def test_packaged_bridge_token_protects_capture_endpoint(tmp_path):
+    token = "bridge-token-for-capture-tests-with-enough-entropy"
+    client = TestClient(
+        create_app(
+            tmp_path / "archive.db",
+            data_dir=tmp_path / "app-data",
+            extension_bridge_token=token,
+        )
+    )
+
+    assert client.post("/api/capture/conversations", json=_payload()).status_code == 403
+    assert (
+        client.post(
+            "/api/capture/conversations",
+            json=_payload(),
+            headers={"X-Reweave-Bridge-Token": "wrong-token"},
+        ).status_code
+        == 403
+    )
+    response = client.post(
+        "/api/capture/conversations",
+        json=_payload(),
+        headers={"X-Reweave-Bridge-Token": token},
+    )
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "created"
