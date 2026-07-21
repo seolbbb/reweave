@@ -168,6 +168,26 @@ def test_context_assembly_filters_before_deterministic_ranking_and_deduplication
     assert first.items[0].source_title
 
 
+def test_private_context_assembly_allows_normal_cross_space_without_browser_scope_keys(
+    tmp_path, fixtures_dir
+):
+    context, items = _seed_assembly_context(tmp_path / "archive.db", fixtures_dir)
+
+    result = assemble_context(
+        context,
+        _assembly_input(
+            allowed_scopes=(),
+            draft="Reweave project release packaging preferences",
+        ),
+    )
+
+    selected_ids = {item.item_id for item in result.items}
+    assert items["project"].id in selected_ids
+    assert items["personal"].id in selected_ids
+    assert items["work"].id in selected_ids
+    assert items["sensitive"].id not in selected_ids
+
+
 def test_context_assembly_honors_budget_and_excludes_previously_supplied_items(
     tmp_path, fixtures_dir
 ):
@@ -336,6 +356,16 @@ def test_context_assembly_api_rejects_invalid_oversized_and_unavailable_requests
     unsafe_scope["allowed_scopes"] = [{"scope_type": "personal", "scope_key": ""}]
     assert (
         client.post("/api/context/assembly", json=unsafe_scope, headers=headers).status_code
+        == 422
+    )
+
+    missing_non_private_scope = _api_payload()
+    missing_non_private_scope["destination"] = "work"
+    missing_non_private_scope["allowed_scopes"] = []
+    assert (
+        client.post(
+            "/api/context/assembly", json=missing_non_private_scope, headers=headers
+        ).status_code
         == 422
     )
 

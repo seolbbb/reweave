@@ -23,7 +23,7 @@ def test_manifest_is_permission_minimal_and_has_no_page_access():
     }
 
 
-def test_extension_reads_provider_pages_only_in_the_explicit_save_handler():
+def test_extension_reads_provider_pages_only_in_explicit_save_or_use_handlers():
     background = (EXTENSION_DIR / "background.js").read_text(encoding="utf-8")
     popup = (EXTENSION_DIR / "popup.js").read_text(encoding="utf-8")
     reminder = (EXTENSION_DIR / "reminder.js").read_text(encoding="utf-8")
@@ -31,6 +31,7 @@ def test_extension_reads_provider_pages_only_in_the_explicit_save_handler():
     assert 'const NATIVE_HOST = "com.reweave.bridge"' in background
     assert 'type: "ping"' in background
     assert 'message?.type === "reweave:save-conversation"' in background
+    assert 'message?.type === "reweave:use-context"' in background
     assert 'adapter: "chatgpt-adapter.js"' in background
     assert 'adapter: "claude-adapter.js"' in background
     assert "files: [context.provider.adapter]" in background
@@ -44,6 +45,7 @@ def test_extension_reads_provider_pages_only_in_the_explicit_save_handler():
     assert "chrome.tabs" not in popup
     assert "chrome.scripting" not in popup
     assert 'save.addEventListener("click", saveConversation)' in popup
+    assert 'useContext.addEventListener("click", useReweave)' in popup
     assert "checkAvailability();" in popup
 
 
@@ -53,6 +55,7 @@ def test_popup_exposes_accessible_actionable_states():
 
     assert 'aria-live="polite"' in html
     assert '<button id="save" type="button"' in html
+    assert '<button id="use" type="button"' in html
     assert '<button id="retry" class="secondary" type="button"' in html
     assert "min-height: 44px" in css
     assert "prefers-color-scheme: dark" in css
