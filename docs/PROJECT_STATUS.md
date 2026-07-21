@@ -60,6 +60,12 @@ Current code and historical verification show:
 - Evidence whose source conversation was removed remains readable as a compact local snapshot
   without a misleading source action; source-load failures preserve the excerpt and explain
   the fallback inline.
+- A provider-neutral explicit web capture model validates complete ordered ChatGPT and Claude
+  conversations, including stable external identity, timestamps, roles, message identity,
+  non-empty content, duplicate IDs, unknown fields, and bounded payload size.
+- `POST /api/capture/conversations` persists valid captures immediately without an LLM key,
+  reuses the archive's transactional import, FTS, and embedding-invalidation path, and reports
+  created, updated, or unchanged outcomes without returning raw conversation content.
 
 The preceding list describes current software, not completion of the Context Library product contract.
 
@@ -68,11 +74,27 @@ The preceding list describes current software, not completion of the Context Lib
 - TASK-000 and TASK-001 are integrated and verified.
 - PHASE-001 remains active because the explicit web-chat Save and Use loop and durable
   automatic batching are not implemented.
-- TASK-002 is next. Its first approximately two-hour slice is the provider-neutral local
-  whole-conversation capture and idempotent persistence contract shared by future ChatGPT and
-  Claude extension adapters.
+- The first TASK-002 slice completes the provider-neutral local whole-conversation capture and
+  idempotent persistence contract shared by future ChatGPT and Claude extension adapters.
+- The next bounded TASK-002 slice is a secure Chrome/Edge extension-to-local-app connection
+  scaffold and availability handshake; provider DOM adapters and Save UI follow after it.
 
 ## Verification evidence
+
+### Fresh in the TASK-002 local capture contract slice
+
+- Five focused capture tests passed for ChatGPT and Claude payloads, no-key persistence,
+  restart reads, exact content and order, idempotent update and unchanged outcomes, FTS update,
+  duplicate message identity, timestamp validation, and invalid or empty payload atomicity.
+- Ruff passed across the repository.
+- 132 Python tests passed with one pre-existing Starlette/httpx deprecation warning.
+- 23 frontend tests passed; frontend assets were not rebuilt because no frontend file changed.
+- A fresh clean PyInstaller build completed successfully and created
+  `dist/Reweave/Reweave.exe` (17,370,194 bytes).
+- The packaged executable accepted ChatGPT and Claude captures without an LLM key, returned
+  created then unchanged for an identical repeat, rejected an empty capture with HTTP 422,
+  exposed both conversations in Library and Search, advertised the capture route in OpenAPI,
+  and remained running for an isolated 8-second smoke. Temporary data and processes were removed.
 
 ### Fresh in the TASK-001 source-evidence navigation slice
 
@@ -188,7 +210,9 @@ These are historical merge records and were not rerun by the current documentati
   backend analysis/read APIs, Context Home, Explorer, and source-evidence navigation now
   exist, but durable batching/retry, full Core Self behavior, automatic routing, Knowledge
   Graph, correction learning, and exception Review do not yet exist.
-- A ChatGPT and Claude browser extension with explicit Save to Reweave and Use Reweave actions does not yet exist.
+- The local whole-conversation capture contract now exists, but a Chrome/Edge extension,
+  secure local connection handshake, ChatGPT and Claude DOM adapters, explicit Save and Use
+  actions, and non-blocking reminders do not yet exist.
 - Current Insight Reports have not yet been migrated into Conversation Brief and analysis-history behavior.
 - Current archive search has not yet been reframed or connected as Sources / Evidence Search for Context.
 - Current archive backup and removal do not yet satisfy the Context Library's encrypted
@@ -204,20 +228,21 @@ These are historical merge records and were not rerun by the current documentati
 
 - TASK-002: Implement the ChatGPT and Claude whole-conversation Save to Reweave extension
   flow with idempotent update and non-blocking save reminders.
-- Current bounded slice: Define and implement the provider-neutral local capture payload and
-  app endpoint that persist one complete ordered ChatGPT or Claude conversation immediately,
-  without requiring an API key or waiting for analysis. Repeating a save for the same provider
-  conversation updates the existing archive record instead of duplicating it. Extension UI,
-  provider DOM adapters, and reminders remain later TASK-002 slices.
-- Acceptance: Valid ChatGPT- and Claude-shaped capture payloads preserve provider identity,
-  external conversation identity, title, timestamps, roles, message order, and content; a
-  repeated capture updates the same conversation idempotently; invalid or empty payloads fail
-  without partial writes; saved source data is readable after store restart without an LLM key.
-- Verify: Add focused capture-model, persistence, and API tests for both providers, duplicate
-  update, validation failure, restart durability, and no-key operation; run the full repository
-  checks and strict document validator; rebuild the frontend if changed; create
-  `dist/Reweave/Reweave.exe` with the required clean PyInstaller command; and smoke the packaged
-  capture endpoint against an isolated database.
+- Current bounded slice: Create the Manifest V3 Chrome/Edge extension scaffold and the secure
+  local connection and availability handshake it will use before reading any provider page.
+  Select the local transport only after comparing browser support, discovery, origin exposure,
+  port conflicts, and packaged-app behavior. ChatGPT and Claude DOM reading, Save UI, and
+  reminders remain later TASK-002 slices.
+- Acceptance: The extension can determine whether the packaged Reweave app is available and
+  can reach only the intended local service through the selected transport; ordinary web pages
+  do not gain capture access; unavailable, conflicting, and malformed handshake states produce
+  an actionable extension status; the scaffold loads in both Chrome and Edge without reading
+  page content or requesting broader host permissions than this handshake needs.
+- Verify: Add automated transport, origin/authorization, discovery, unavailable-app, conflict,
+  and malformed-handshake tests plus extension manifest checks; run the full repository gates
+  and strict document validator; create `dist/Reweave/Reweave.exe` with the required clean
+  PyInstaller command; load the unpacked extension in Chromium; and smoke the packaged handshake
+  with both available and unavailable local-app states.
 
 ## Resume checklist
 

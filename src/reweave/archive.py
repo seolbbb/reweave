@@ -31,6 +31,17 @@ class ImportSummary:
 
 
 @dataclass(frozen=True)
+class ConversationCaptureSummary:
+    """Persistence result for one explicitly captured web conversation."""
+
+    conversation_id: str
+    outcome: Literal["created", "updated", "unchanged"]
+    inserted_messages: int
+    updated_messages: int
+    invalidated_embeddings: int
+
+
+@dataclass(frozen=True)
 class ArchivedConversation:
     id: str
     source: Literal["chatgpt", "claude"]
@@ -188,6 +199,42 @@ class ArchiveStore:
             return self.import_directory(extracted_dir)
 
         raise ValueError(f"Unsupported import file type: {input_path.suffix or input_path.name}")
+
+    def capture_conversation(
+        self, conversation: NormalizedConversation
+    ) -> ConversationCaptureSummary:
+        """Persist one validated explicit web capture without a temporary export file."""
+        if not conversation.source_id:
+            raise ValueError("Captured conversations require a stable external ID.")
+        if not conversation.messages:
+            raise ValueError("Captured conversations require at least one message.")
+        if conversation.raw_message_count != len(conversation.messages):
+            raise ValueError("Captured conversation message count does not match its messages.")
+
+        source_path = f"capture://{conversation.source}/{conversation.id}"
+        with self._connect() as conn:
+            result = self._insert_conversation(conn, conversation, source_path)
+            stored = conn.execute(
+                "SELECT id FROM conversations WHERE source = ? AND source_id = ?",
+                (conversation.source, conversation.source_id),
+            ).fetchone()
+            if stored is None:  # pragma: no cover - guarded by the transaction above.
+                raise RuntimeError("Captured conversation could not be read after persistence.")
+
+        inserted_conversation, updated_conversation, inserted, updated, invalidated = result
+        if inserted_conversation:
+            outcome = "created"
+        elif updated_conversation or inserted or updated:
+            outcome = "updated"
+        else:
+            outcome = "unchanged"
+        return ConversationCaptureSummary(
+            conversation_id=stored["id"],
+            outcome=outcome,
+            inserted_messages=inserted,
+            updated_messages=updated,
+            invalidated_embeddings=invalidated,
+        )
 
     def _import_json_file(self, file_path: Path) -> ImportSummary:
         parsed = 0
@@ -572,7 +619,7 @@ class ArchiveStore:
         self,
         conn: sqlite3.Connection,
         conversation: NormalizedConversation,
-        source_path: Path,
+        source_path: Path | str,
     ) -> tuple[bool, bool, int, int, int]:
         existing = None
         if conversation.source_id:
