@@ -31,6 +31,7 @@ Sensitivity = Literal["normal", "sensitive"]
 ContextStatus = Literal["active", "superseded", "stale", "archived"]
 ScopeType = Literal["core_self", "personal", "work", "project", "topic", "destination"]
 EvidenceRelationship = Literal["supports", "contradicts", "context"]
+BriefAnalysisStatus = Literal["pending", "complete", "failed"]
 
 ANALYSIS_MODES = {"auto", "project", "learning", "research_writing", "context_handoff"}
 CONTEXT_ITEM_TYPES = {
@@ -50,6 +51,7 @@ SENSITIVITIES = {"normal", "sensitive"}
 CONTEXT_STATUSES = {"active", "superseded", "stale", "archived"}
 SCOPE_TYPES = {"core_self", "personal", "work", "project", "topic", "destination"}
 EVIDENCE_RELATIONSHIPS = {"supports", "contradicts", "context"}
+BRIEF_ANALYSIS_STATUSES = {"pending", "complete", "failed"}
 
 
 @dataclass(frozen=True)
@@ -148,6 +150,7 @@ class ConversationBrief:
     source_provider: str
     source_title: str
     source_created_at: str
+    source_fingerprint: str
     main_subject: str
     user_goal: str
     important_outcomes: tuple[str, ...]
@@ -160,6 +163,7 @@ class ConversationBrief:
     prompt_version: str
     analysis_provider: str
     analysis_model: str
+    analysis_status: str
     created_at: str
     updated_at: str
     context_item_ids: tuple[str, ...]
@@ -189,6 +193,8 @@ class ContextLibraryStore:
         prompt_version: str,
         analysis_provider: str,
         analysis_model: str,
+        analysis_status: str = "complete",
+        source_fingerprint: str = "",
     ) -> ConversationBrief:
         """Create or update one analysis-versioned brief for an archived conversation."""
         _require_choice("analysis mode", analysis_mode, ANALYSIS_MODES)
@@ -198,6 +204,8 @@ class ContextLibraryStore:
         prompt = _require_text("prompt version", prompt_version, 200)
         provider = _require_text("analysis provider", analysis_provider, 200)
         model = _require_text("analysis model", analysis_model, 300)
+        fingerprint = source_fingerprint.strip()[:128]
+        _require_choice("analysis status", analysis_status, BRIEF_ANALYSIS_STATUSES)
         outcome_list = _normalize_text_list(important_outcomes)
         decision_list = _normalize_text_list(decisions)
         lesson_list = _normalize_text_list(lessons)
@@ -224,6 +232,7 @@ class ContextLibraryStore:
                 source["source"],
                 source["title"],
                 source["created_at"],
+                fingerprint,
                 subject,
                 goal,
                 _dump_list(outcome_list),
@@ -236,6 +245,7 @@ class ContextLibraryStore:
                 prompt,
                 provider,
                 model,
+                analysis_status,
                 created_at,
                 now,
             )
@@ -244,11 +254,12 @@ class ContextLibraryStore:
                     """
                     INSERT INTO conversation_briefs (
                         id, source_conversation_id, source_record_id, source_external_id,
-                        source_provider, source_title, source_created_at, main_subject,
-                        user_goal, important_outcomes, decisions, lessons,
+                        source_provider, source_title, source_created_at, source_fingerprint,
+                        main_subject, user_goal, important_outcomes, decisions, lessons,
                         unresolved_questions, actions, analysis_mode, analysis_version,
-                        prompt_version, analysis_provider, analysis_model, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        prompt_version, analysis_provider, analysis_model, analysis_status,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (brief_id, *values),
                 )
@@ -258,10 +269,11 @@ class ContextLibraryStore:
                     UPDATE conversation_briefs
                     SET source_conversation_id = ?, source_record_id = ?, source_external_id = ?,
                         source_provider = ?, source_title = ?, source_created_at = ?,
-                        main_subject = ?, user_goal = ?, important_outcomes = ?, decisions = ?,
-                        lessons = ?, unresolved_questions = ?, actions = ?, analysis_mode = ?,
+                        source_fingerprint = ?, main_subject = ?, user_goal = ?,
+                        important_outcomes = ?, decisions = ?, lessons = ?,
+                        unresolved_questions = ?, actions = ?, analysis_mode = ?,
                         analysis_version = ?, prompt_version = ?, analysis_provider = ?,
-                        analysis_model = ?, created_at = ?, updated_at = ?
+                        analysis_model = ?, analysis_status = ?, created_at = ?, updated_at = ?
                     WHERE id = ?
                     """,
                     (*values, brief_id),
@@ -277,6 +289,65 @@ class ContextLibraryStore:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM conversation_briefs WHERE id = ?", (brief_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_brief(conn, row)
+
+    def set_brief_analysis_status(self, brief_id: str, analysis_status: str) -> ConversationBrief:
+        """Update the durable completion marker for one analysis-versioned Brief."""
+        _require_choice("analysis status", analysis_status, BRIEF_ANALYSIS_STATUSES)
+        with self._connect() as conn:
+            result = conn.execute(
+                """
+                UPDATE conversation_briefs
+                SET analysis_status = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (analysis_status, _now(), brief_id),
+            )
+            if result.rowcount == 0:
+                raise LookupError("Conversation Brief not found.")
+        brief = self.get_brief(brief_id)
+        if brief is None:  # pragma: no cover
+            raise RuntimeError("The Conversation Brief disappeared while updating status.")
+        return brief
+
+    def reset_brief_items(self, brief_id: str) -> None:
+        """Remove one Brief's item links and delete items left without any Brief."""
+        with self._connect() as conn:
+            if (
+                conn.execute(
+                    "SELECT 1 FROM conversation_briefs WHERE id = ?", (brief_id,)
+                ).fetchone()
+                is None
+            ):
+                raise LookupError("Conversation Brief not found.")
+            item_ids = [
+                row["item_id"]
+                for row in conn.execute(
+                    "SELECT item_id FROM brief_context_items WHERE brief_id = ?", (brief_id,)
+                ).fetchall()
+            ]
+            conn.execute("DELETE FROM brief_context_items WHERE brief_id = ?", (brief_id,))
+            for item_id in item_ids:
+                remaining = conn.execute(
+                    "SELECT 1 FROM brief_context_items WHERE item_id = ? LIMIT 1", (item_id,)
+                ).fetchone()
+                if remaining is None:
+                    conn.execute("DELETE FROM context_items WHERE id = ?", (item_id,))
+
+    def get_brief_for_analysis(
+        self, source_record_id: str, analysis_version: str
+    ) -> ConversationBrief | None:
+        """Return an existing Brief for an idempotent source/version analysis key."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM conversation_briefs
+                WHERE source_record_id = ? AND analysis_version = ?
+                """,
+                (source_record_id, analysis_version),
             ).fetchone()
             if row is None:
                 return None
@@ -586,6 +657,7 @@ class ContextLibraryStore:
             source_provider=row["source_provider"],
             source_title=row["source_title"],
             source_created_at=row["source_created_at"],
+            source_fingerprint=row["source_fingerprint"],
             main_subject=row["main_subject"],
             user_goal=row["user_goal"],
             important_outcomes=_load_list(row["important_outcomes"]),
@@ -598,6 +670,7 @@ class ContextLibraryStore:
             prompt_version=row["prompt_version"],
             analysis_provider=row["analysis_provider"],
             analysis_model=row["analysis_model"],
+            analysis_status=row["analysis_status"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             context_item_ids=item_ids,
@@ -765,6 +838,7 @@ class ContextLibraryStore:
                     source_provider TEXT NOT NULL,
                     source_title TEXT NOT NULL,
                     source_created_at TEXT NOT NULL,
+                    source_fingerprint TEXT NOT NULL DEFAULT '',
                     main_subject TEXT NOT NULL,
                     user_goal TEXT NOT NULL,
                     important_outcomes TEXT NOT NULL DEFAULT '[]',
@@ -777,6 +851,7 @@ class ContextLibraryStore:
                     prompt_version TEXT NOT NULL,
                     analysis_provider TEXT NOT NULL,
                     analysis_model TEXT NOT NULL,
+                    analysis_status TEXT NOT NULL DEFAULT 'complete',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(source_record_id, analysis_version)
@@ -866,9 +941,32 @@ class ContextLibraryStore:
                 CREATE INDEX IF NOT EXISTS idx_context_evidence_source
                     ON context_evidence(source_conversation_id, source_message_id);
                 INSERT OR REPLACE INTO schema_meta(key, value)
-                    VALUES ('context_schema_version', '1');
+                    VALUES ('context_schema_version', '3');
                 """
             )
+            self._ensure_column(
+                conn,
+                "conversation_briefs",
+                "analysis_status",
+                "TEXT NOT NULL DEFAULT 'complete'",
+            )
+            self._ensure_column(
+                conn,
+                "conversation_briefs",
+                "source_fingerprint",
+                "TEXT NOT NULL DEFAULT ''",
+            )
+
+    @staticmethod
+    def _ensure_column(
+        conn: sqlite3.Connection,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)

@@ -96,7 +96,7 @@ def test_context_round_trip_survives_store_restart(tmp_path, fixtures_dir):
         context_schema_version = conn.execute(
             "SELECT value FROM schema_meta WHERE key = 'context_schema_version'"
         ).fetchone()[0]
-    assert context_schema_version == "1"
+    assert context_schema_version == "3"
 
 
 def test_save_brief_is_idempotent_for_one_analysis_version(tmp_path, fixtures_dir):
@@ -227,5 +227,89 @@ def test_app_startup_initializes_context_schema(tmp_path):
             conn.execute(
                 "SELECT value FROM schema_meta WHERE key = 'context_schema_version'"
             ).fetchone()[0]
-            == "1"
+            == "3"
+        )
+
+
+def test_context_schema_v1_migrates_analysis_metadata_without_losing_briefs(tmp_path, fixtures_dir):
+    db_path = tmp_path / "archive.db"
+    archive = ArchiveStore(db_path)
+    archive.import_directory(fixtures_dir)
+    conversation = archive.get_conversation(
+        archive.search("Obsidian", provider="claude", limit=1)[0].conversation_id
+    )
+    assert conversation is not None
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE conversation_briefs (
+                id TEXT PRIMARY KEY,
+                source_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+                source_record_id TEXT NOT NULL,
+                source_external_id TEXT,
+                source_provider TEXT NOT NULL,
+                source_title TEXT NOT NULL,
+                source_created_at TEXT NOT NULL,
+                main_subject TEXT NOT NULL,
+                user_goal TEXT NOT NULL,
+                important_outcomes TEXT NOT NULL DEFAULT '[]',
+                decisions TEXT NOT NULL DEFAULT '[]',
+                lessons TEXT NOT NULL DEFAULT '[]',
+                unresolved_questions TEXT NOT NULL DEFAULT '[]',
+                actions TEXT NOT NULL DEFAULT '[]',
+                analysis_mode TEXT NOT NULL,
+                analysis_version TEXT NOT NULL,
+                prompt_version TEXT NOT NULL,
+                analysis_provider TEXT NOT NULL,
+                analysis_model TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(source_record_id, analysis_version)
+            );
+            INSERT OR REPLACE INTO schema_meta(key, value)
+                VALUES ('context_schema_version', '1');
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO conversation_briefs (
+                id, source_conversation_id, source_record_id, source_external_id,
+                source_provider, source_title, source_created_at, main_subject, user_goal,
+                analysis_mode, analysis_version, prompt_version, analysis_provider,
+                analysis_model, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-brief",
+                conversation.id,
+                conversation.id,
+                conversation.source_id,
+                conversation.source,
+                conversation.title,
+                conversation.created_at,
+                "Legacy subject",
+                "Preserve the existing Brief.",
+                "auto",
+                "legacy-v1",
+                "legacy-prompt-v1",
+                "openai",
+                "legacy-model",
+                "2026-07-21T00:00:00+00:00",
+                "2026-07-21T00:00:00+00:00",
+            ),
+        )
+
+    migrated = ContextLibraryStore(db_path)
+    brief = migrated.get_brief("legacy-brief")
+
+    assert brief is not None
+    assert brief.main_subject == "Legacy subject"
+    assert brief.analysis_status == "complete"
+    assert brief.source_fingerprint == ""
+    with sqlite3.connect(db_path) as conn:
+        assert (
+            conn.execute(
+                "SELECT value FROM schema_meta WHERE key = 'context_schema_version'"
+            ).fetchone()[0]
+            == "3"
         )
