@@ -76,7 +76,11 @@ Tasks:
   Claude with provider-aware routing and fail-closed DOM normalization after 151 Python tests,
   34 frontend tests, Ruff, JavaScript and TypeScript checks, a production frontend build, a clean
   dual-executable build, Chrome for Testing and installed Edge created/unchanged/changed-DOM
-  scenarios, and packaged invalid-capture atomicity passed.
+  scenarios, and packaged invalid-capture atomicity passed. The fifth TASK-002 slice added the
+  action-injected, page-lifetime ChatGPT and Claude unsaved reminder after 152 Python tests,
+  45 frontend tests, Ruff, JavaScript and TypeScript checks, a production frontend build, a clean
+  dual-executable build, structural no-text-read regressions, and packaged Chrome/Edge reminder,
+  dismissal, re-Save, unavailable-app, navigation, and cleanup evidence passed.
 
 Tasks:
 
@@ -89,7 +93,7 @@ Tasks:
     The minimal Context Home and Explorer now render the same linked model with responsive,
     accessible loading, empty, scoped browsing, and item-detail states. Live evidence opens the
     exact supporting message, while removed sources and load failures retain compact evidence.
-- [ ] TASK-002: Implement the ChatGPT and Claude whole-conversation Save to Reweave extension flow with idempotent update and non-blocking save reminders.
+- [x] TASK-002: Implement the ChatGPT and Claude whole-conversation Save to Reweave extension flow with idempotent update and non-blocking save reminders.
   - First bounded slice complete: The provider-neutral local capture payload, persistence, and
     app endpoint accept complete ordered ChatGPT and Claude conversations with immediate no-key
     local persistence, stable provider/external identity, idempotent repeated saves, validation
@@ -110,12 +114,19 @@ Tasks:
     stable DOM markers, signed-in state, complete alternating turns, unique identities, and
     bounded normalized content, while the shared popup and native boundary preserve ChatGPT
     behavior and production permission minimization.
-  - Next bounded slice: Implement the non-blocking unsaved-conversation reminder after an
-    explicit successful Save. Use only an action-triggered, page-lifetime observer and minimum
-    ephemeral baseline/dismissal state; preserve no-read-before-action behavior, fail closed on
-    navigation or uncertain DOM state, and verify ChatGPT and Claude reminder, dismissal, Save,
-    unavailable-app, permission, full-gate, clean executable, Chrome/Edge, and packaged scenarios.
+  - Fifth bounded slice complete: After an explicit successful Save, a page-lifetime controller
+    detects one new complete assistant response from structural role and turn counts without
+    reading message text, waits for 30 seconds of conversation inactivity, and presents a
+    non-blocking prompt plus per-tab `SAVE` badge. Prompt auto-hide, dismissal and re-arming,
+    explicit re-Save, unavailable-app retry, navigation and startup clearing, production
+    permission minimization, Chrome/Edge packaged flows, and cleanup are verified.
 - [ ] TASK-003: Implement the user-requested Use Reweave flow using the current chat and drafted request, with explicit context insertion and on-request refresh.
+  - Next bounded slice: Implement the authenticated provider-neutral Context assembly contract
+    and local endpoint for one explicit, bounded current-chat payload and non-empty draft. Filter
+    existing Context Items by allowed scope and sensitivity before deterministic ranking,
+    deduplication, and context-budget assembly; return insertion-ready text with compact item
+    provenance; persist neither the chat nor draft; and defer provider DOM insertion and refresh
+    controls to the next TASK-003 slice.
 - [ ] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
 
 ### PHASE-002 — Personalization, trust, and retrieval hardening
