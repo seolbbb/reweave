@@ -347,3 +347,32 @@ The following entries record the current accepted product direction.
 - Reconsider when: External validation becomes necessary for a safety, commercial, or distribution decision.
 - Supersedes: DEC-010
 - Superseded by: None
+
+### DEC-023 — Use Native Messaging as the browser-to-local-app boundary
+
+- Status: accepted
+- Date: 2026-07-21
+- Initiated by: Agent-owned architecture within accepted TASK-002
+- Context: The desktop app binds an unpredictable loopback port, while the extension must discover
+  the packaged app without granting ordinary web pages capture access or requesting localhost and
+  provider permissions before an explicit user action.
+- User intent/value protected: Keep browser access explicit, local, permission-minimal, and
+  understandable while supporting both Chrome and Edge reliably.
+- Intervention: None; the user delegated low-level implementation decisions, and this choice
+  implements the accepted local-first and explicit-boundary contract.
+- Options considered: A fixed loopback HTTP port with CORS and extension-origin checks, browser
+  Native Messaging with an extension-origin allowlist, or a manual pairing and port workflow.
+- Decision: Use Chrome and Edge Native Messaging as the extension boundary. Package a separate
+  console host, allow only explicit extension origins in its host manifest, and let that host read
+  an atomic short-lived runtime descriptor and authenticate to the app's random loopback port with
+  an ephemeral token. Do not give the availability scaffold provider, localhost, or content-script
+  access, and do not expose its token or port to the extension.
+- Consequences: Browser and Windows registration are required; Chrome and Edge store IDs must both
+  be allowlisted when they differ; installer work must own durable registration. Ordinary pages
+  cannot invoke the native host, port conflicts remain avoided, stale descriptors fail closed, and
+  later explicit Save and Use messages can reuse the same authenticated boundary.
+- Reconsider when: Browser distribution or enterprise policy blocks native-host installation,
+  installer friction prevents practical dogfooding, or a first-party provider integration offers
+  an equally explicit and less privileged local boundary.
+- Supersedes: None
+- Superseded by: None

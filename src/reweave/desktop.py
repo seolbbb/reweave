@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import socket
 import threading
 import time
@@ -11,6 +12,7 @@ from pathlib import Path
 
 import uvicorn
 
+from reweave.extension_bridge import remove_runtime_descriptor, write_runtime_descriptor
 from reweave.paths import get_app_paths
 from reweave.web import create_app
 
@@ -33,7 +35,12 @@ def main(db_path: Path | None = None) -> None:
     url = f"http://{host}:{port}"
     server = uvicorn.Server(
         uvicorn.Config(
-            create_app(resolved_db_path, static_dir=static_dir, data_dir=app_paths.data_dir),
+            create_app(
+                resolved_db_path,
+                static_dir=static_dir,
+                data_dir=app_paths.data_dir,
+                extension_bridge_token=(bridge_token := secrets.token_urlsafe(32)),
+            ),
             host=host,
             port=port,
             log_level="warning",
@@ -41,12 +48,21 @@ def main(db_path: Path | None = None) -> None:
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    _wait_for_server(f"{url}/api/health")
 
     try:
+        _wait_for_server(f"{url}/api/health")
+        write_runtime_descriptor(
+            app_paths.extension_runtime_path,
+            port=port,
+            token=bridge_token,
+        )
         webview.create_window("Reweave", url, width=1280, height=820, min_size=(960, 640))
         webview.start()
     finally:
+        remove_runtime_descriptor(
+            app_paths.extension_runtime_path,
+            expected_token=bridge_token,
+        )
         server.should_exit = True
         thread.join(timeout=5)
 
