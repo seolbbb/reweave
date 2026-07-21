@@ -200,6 +200,20 @@ def extract_context_from_conversation(
     )
 
 
+def conversation_source_fingerprint(
+    archive_store: ArchiveStore,
+    conversation_id: str,
+) -> str:
+    """Return the stable source-version key used by extraction and its durable queue."""
+    conversation = archive_store.get_conversation(conversation_id)
+    if conversation is None:
+        raise LookupError("Archived conversation not found.")
+    messages = archive_store.get_messages(conversation_id)
+    if not messages:
+        raise ValueError("The archived conversation has no messages to analyze.")
+    return _source_fingerprint(conversation, messages)
+
+
 def normalize_context_extraction(
     raw_result: dict[str, Any], messages: list[ArchivedMessage]
 ) -> NormalizedExtraction:
