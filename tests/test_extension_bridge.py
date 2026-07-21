@@ -10,6 +10,7 @@ import urllib.error
 import pytest
 from fastapi.testclient import TestClient
 
+import reweave.native_host as native_host
 from reweave.extension_bridge import (
     BRIDGE_PROTOCOL_VERSION,
     read_runtime_descriptor,
@@ -17,7 +18,9 @@ from reweave.extension_bridge import (
     write_runtime_descriptor,
 )
 from reweave.native_host import (
+    MAX_REQUEST_BYTES,
     check_app_availability,
+    forward_conversation_capture,
     handle_native_message,
     read_native_message,
     write_native_message,
@@ -36,8 +39,8 @@ class _FakeResponse:
     def __exit__(self, *_args):
         return False
 
-    def read(self) -> bytes:
-        return self._payload
+    def read(self, size: int = -1) -> bytes:
+        return self._payload if size < 0 else self._payload[:size]
 
 
 class _PartialReadStream(io.BytesIO):
@@ -128,7 +131,7 @@ def test_native_message_framing_round_trips_one_json_object():
 
 def test_native_message_framing_rejects_oversized_or_truncated_requests():
     with pytest.raises(ValueError, match="size"):
-        read_native_message(io.BytesIO(struct.pack("=I", 1024 * 1024 + 1)))
+        read_native_message(io.BytesIO(struct.pack("=I", MAX_REQUEST_BYTES + 1)))
     with pytest.raises(ValueError, match="ended"):
         read_native_message(io.BytesIO(struct.pack("=I", 12) + b"{}"))
 
@@ -184,10 +187,109 @@ def test_native_host_reports_actionable_unavailable_and_incompatible_states(tmp_
         check_app_availability(runtime_path, urlopen=incompatible_response)["status"]
         == "incompatible"
     )
-    assert handle_native_message({"type": "capture"})["reason"] == "unsupported_message"
+    assert (
+        handle_native_message({"type": "capture", "protocol_version": 1})["reason"]
+        == "unsupported_message"
+    )
     assert (
         handle_native_message({"type": "ping", "protocol_version": 99})["status"]
         == "incompatible"
+    )
+
+
+def _capture_payload() -> dict:
+    return {
+        "provider": "chatgpt",
+        "external_id": "conversation-42",
+        "title": "Captured from ChatGPT",
+        "created_at": None,
+        "updated_at": None,
+        "messages": [
+            {
+                "external_id": "conversation-42:turn:0",
+                "role": "user",
+                "content": "Keep this exact question.",
+                "timestamp": None,
+            }
+        ],
+    }
+
+
+def test_native_host_forwards_capture_with_token_and_returns_only_summary(tmp_path):
+    runtime_path = tmp_path / "extension-bridge.json"
+    token = "private-runtime-token-with-enough-entropy"
+    write_runtime_descriptor(runtime_path, port=45678, token=token, pid=991)
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url == "http://127.0.0.1:45678/api/capture/conversations"
+        assert request.get_method() == "POST"
+        assert request.get_header("Content-type") == "application/json"
+        assert request.get_header("X-reweave-bridge-token") == token
+        assert json.loads(request.data.decode("utf-8")) == _capture_payload()
+        assert timeout == 10.0
+        return _FakeResponse({"outcome": "created", "message_count": 1})
+
+    result = handle_native_message(
+        {
+            "type": "capture_conversation",
+            "protocol_version": 1,
+            "capture": _capture_payload(),
+        },
+        runtime_path=runtime_path,
+        urlopen=fake_urlopen,
+    )
+
+    assert result == {
+        "type": "capture_result",
+        "status": "saved",
+        "reason": "stored",
+        "protocol_version": 1,
+        "outcome": "created",
+        "message_count": 1,
+    }
+    serialized = json.dumps(result)
+    assert token not in serialized
+    assert "Keep this exact question" not in serialized
+    assert "45678" not in serialized
+
+
+def test_native_host_reports_invalid_unavailable_and_oversized_capture_states(
+    tmp_path, monkeypatch
+):
+    runtime_path = tmp_path / "extension-bridge.json"
+    assert (
+        forward_conversation_capture(_capture_payload(), runtime_path=runtime_path)["reason"]
+        == "app_not_running"
+    )
+
+    write_runtime_descriptor(runtime_path, port=45678, token="a" * 43, pid=991)
+
+    def invalid_response(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            422,
+            "Unprocessable Entity",
+            {},
+            io.BytesIO(b"{}"),
+        )
+
+    assert (
+        forward_conversation_capture(
+            _capture_payload(), runtime_path=runtime_path, urlopen=invalid_response
+        )["reason"]
+        == "invalid_capture"
+    )
+
+    monkeypatch.setattr(native_host, "MAX_CAPTURE_FORWARD_BYTES", 10)
+
+    def should_not_connect(*_args, **_kwargs):
+        raise AssertionError("Oversized captures must not reach the app.")
+
+    assert (
+        forward_conversation_capture(
+            _capture_payload(), runtime_path=runtime_path, urlopen=should_not_connect
+        )["reason"]
+        == "capture_too_large"
     )
 
 
