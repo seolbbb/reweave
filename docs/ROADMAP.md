@@ -54,16 +54,20 @@ Tasks:
   - ChatGPT and Claude extension prototypes support explicit whole-chat Save and user-requested Context use.
   - Unsaved-chat reminders are non-blocking and automatic analysis is durable across restart.
   - Required automated checks, manual flows, production frontend build, Windows executable build, and packaged-app smoke test pass.
-- Verification evidence: In progress. The TASK-001 persistence slice passed 116 Python tests,
-  19 frontend tests, Ruff, TypeScript, the production frontend build, a fresh clean PyInstaller
-  build, and an isolated packaged startup/schema smoke. Phase exit evidence is not yet available.
+- Verification evidence: In progress. The TASK-001 persistence and extraction slices passed
+  124 Python tests, 19 frontend tests, Ruff, TypeScript, the production frontend build, fresh
+  clean PyInstaller builds, and isolated packaged startup/schema smokes. The latest extraction
+  smoke reported Context schema v3 with no foreign-key violations. Phase exit evidence is not
+  yet available.
 
 Tasks:
 
 - [ ] TASK-001: Implement durable Conversation Brief and Context Item persistence, automatic extraction from one archived conversation, a minimal Context Home and Explorer view, and source-evidence navigation.
   - Progress: Durable Brief and Context Item persistence, source snapshots, scopes, versions,
     links, deletion survival, restart durability, and app-startup schema initialization are
-    implemented on the current feature branch. Automatic extraction is the next execution slice.
+    integrated. Source-grounded automatic extraction, versioned purpose prompts, conservative
+    normalization, idempotent reuse, source-change reanalysis, and interrupted retry are
+    implemented in the latest verified slice. Backend API exposure is the next execution slice.
 - [ ] TASK-002: Implement the ChatGPT and Claude whole-conversation Save to Reweave extension flow with idempotent update and non-blocking save reminders.
 - [ ] TASK-003: Implement the user-requested Use Reweave flow using the current chat and drafted request, with explicit context insertion and on-request refresh.
 - [ ] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
