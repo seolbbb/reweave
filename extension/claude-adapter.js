@@ -88,7 +88,22 @@
     return null;
   }
 
-  function pageIsIncomplete() {
+  function preferredStructuralSelector(selectors) {
+    for (const selector of selectors) {
+      const matches = Array.from(document.querySelectorAll(selector)).filter(
+        (node) => !isWithinComposer(node),
+      );
+      const deepest = matches.filter(
+        (node) => !matches.some((other) => other !== node && node.contains(other)),
+      );
+      if (deepest.length) {
+        return selector;
+      }
+    }
+    return null;
+  }
+
+  function pageHasIncompleteHistory() {
     return Boolean(
       document.querySelector(
         [
@@ -96,9 +111,19 @@
           '[data-testid*="show-more"]',
           '[data-testid*="older-message"]',
           '[data-testid*="earlier-message"]',
+        ].join(","),
+      ),
+    );
+  }
+
+  function pageIsStreaming() {
+    return Boolean(
+      document.querySelector(
+        [
           '[data-testid*="stop-response"]',
           '[data-testid*="stop-button"]',
           'button[aria-label*="Stop response"]',
+          'button[aria-label*="Stop generating"]',
         ].join(","),
       ),
     );
@@ -132,6 +157,56 @@
     return `${conversationId}:turn:${index}`;
   }
 
+  function reminderSnapshot() {
+    const conversationId = conversationIdFromLocation();
+    if (!conversationId) {
+      return failure(isLoggedOut() ? "logged_out" : "unsupported_page");
+    }
+    if (pageHasIncompleteHistory()) {
+      return failure("incomplete_conversation");
+    }
+
+    const userSelector = preferredStructuralSelector(userSelectors);
+    const assistantSelector = preferredStructuralSelector(assistantSelectors);
+    if (!userSelector && !assistantSelector) {
+      return failure(isLoggedOut() ? "logged_out" : "changed_dom");
+    }
+
+    const combinedSelector = [userSelector, assistantSelector].filter(Boolean).join(",");
+    const turns = Array.from(document.querySelectorAll(combinedSelector))
+      .filter((node) => !isWithinComposer(node))
+      .map((node) => ({
+        role: userSelector && node.matches(userSelector) ? "user" : "assistant",
+      }));
+    const userCount = turns.filter((turn) => turn.role === "user").length;
+    const assistantCount = turns.length - userCount;
+
+    if (
+      turns[0]?.role !== "user" ||
+      assistantCount > userCount ||
+      userCount - assistantCount > 1 ||
+      turns.some((turn, index) => turn.role !== (index % 2 === 0 ? "user" : "assistant"))
+    ) {
+      return failure("incomplete_conversation");
+    }
+    if (pageIsStreaming()) {
+      return {
+        ok: false,
+        reason: "streaming",
+        provider: "claude",
+        external_id: conversationId,
+      };
+    }
+
+    return {
+      ok: true,
+      provider: "claude",
+      external_id: conversationId,
+      message_count: turns.length,
+      assistant_count: assistantCount,
+    };
+  }
+
   function conversationTitle() {
     const rawTitle = document.title
       .replace(/\s*[|–—-]\s*Claude\s*$/i, "")
@@ -140,63 +215,70 @@
     return rawTitle && !/^Claude$/i.test(rawTitle) ? rawTitle : "Untitled Claude conversation";
   }
 
-  const conversationId = conversationIdFromLocation();
-  if (!conversationId) {
-    return failure(isLoggedOut() ? "logged_out" : "unsupported_page");
-  }
-  if (pageIsIncomplete()) {
-    return failure("incomplete_conversation");
-  }
+  function captureConversation() {
+    const snapshot = reminderSnapshot();
+    if (!snapshot.ok) {
+      return failure(snapshot.reason);
+    }
 
-  const userSelector = preferredMessageSelector(userSelectors);
-  const assistantSelector = preferredMessageSelector(assistantSelectors);
-  if (!userSelector && !assistantSelector) {
-    return failure(isLoggedOut() ? "logged_out" : "changed_dom");
-  }
+    const userSelector = preferredMessageSelector(userSelectors);
+    const assistantSelector = preferredMessageSelector(assistantSelectors);
+    if (!userSelector && !assistantSelector) {
+      return failure(isLoggedOut() ? "logged_out" : "changed_dom");
+    }
 
-  const combinedSelector = [userSelector, assistantSelector].filter(Boolean).join(",");
-  const turns = Array.from(document.querySelectorAll(combinedSelector))
-    .filter((node) => !isWithinComposer(node) && normalizedText(node))
-    .map((node) => ({
-      role: userSelector && node.matches(userSelector) ? "user" : "assistant",
-      node,
+    const combinedSelector = [userSelector, assistantSelector].filter(Boolean).join(",");
+    const turns = Array.from(document.querySelectorAll(combinedSelector))
+      .filter((node) => !isWithinComposer(node) && normalizedText(node))
+      .map((node) => ({
+        role: userSelector && node.matches(userSelector) ? "user" : "assistant",
+        node,
+      }));
+
+    const messages = turns.map(({ role, node }, index) => ({
+      external_id: externalMessageId(node, snapshot.external_id, index),
+      role,
+      content: normalizedText(node),
+      timestamp: timestampForMessage(node),
     }));
-  const userCount = turns.filter((turn) => turn.role === "user").length;
-  const assistantCount = turns.length - userCount;
+    if (
+      messages.length !== snapshot.message_count ||
+      messages[0]?.role !== "user" ||
+      messages.filter((message) => message.role === "assistant").length !==
+        snapshot.assistant_count ||
+      messages.some(
+        (message, index) => message.role !== (index % 2 === 0 ? "user" : "assistant"),
+      )
+    ) {
+      return failure("incomplete_conversation");
+    }
+    if (messages.some((message) => !message.content)) {
+      return failure("invalid_conversation");
+    }
+    if (new Set(messages.map((message) => message.external_id)).size !== messages.length) {
+      return failure("invalid_conversation");
+    }
 
-  if (
-    turns[0]?.role !== "user" ||
-    assistantCount > userCount ||
-    userCount - assistantCount > 1 ||
-    turns.some((turn, index) => turn.role !== (index % 2 === 0 ? "user" : "assistant"))
-  ) {
-    return failure("incomplete_conversation");
+    const timestamps = messages.map((message) => message.timestamp).filter(Boolean);
+    return {
+      ok: true,
+      adapter_version: 1,
+      capture: {
+        provider: "claude",
+        external_id: snapshot.external_id,
+        title: conversationTitle(),
+        created_at: timestamps[0] || null,
+        updated_at: timestamps[timestamps.length - 1] || null,
+        messages,
+      },
+    };
   }
 
-  const messages = turns.map(({ role, node }, index) => ({
-    external_id: externalMessageId(node, conversationId, index),
-    role,
-    content: normalizedText(node),
-    timestamp: timestampForMessage(node),
-  }));
-  if (messages.some((message) => !message.content)) {
-    return failure("invalid_conversation");
-  }
-  if (new Set(messages.map((message) => message.external_id)).size !== messages.length) {
-    return failure("invalid_conversation");
-  }
+  globalThis.__reweaveProviderAdapter = Object.freeze({
+    provider: "claude",
+    capture: captureConversation,
+    snapshot: reminderSnapshot,
+  });
 
-  const timestamps = messages.map((message) => message.timestamp).filter(Boolean);
-  return {
-    ok: true,
-    adapter_version: 1,
-    capture: {
-      provider: "claude",
-      external_id: conversationId,
-      title: conversationTitle(),
-      created_at: timestamps[0] || null,
-      updated_at: timestamps[timestamps.length - 1] || null,
-      messages,
-    },
-  };
+  return captureConversation();
 })();

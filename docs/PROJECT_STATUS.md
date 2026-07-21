@@ -6,8 +6,8 @@
 - Working language: English
 - Current phase: PHASE-001
 - State: active
-- Repository state: TASK-001 is complete across persistence, extraction, backend API,
-  Context Home and Explorer, and source-evidence navigation. Re-observe Git on every resume.
+- Repository state: TASK-001 and TASK-002 are complete across the first Context surfaces,
+  explicit web-chat Save, and page-lifetime unsaved reminders. Re-observe Git on every resume.
 - Current implementation identity: Local archive and search application with a primary
   Context Home and Explorer, onboarding, archive management, optional hybrid search, cited
   Ask Archive, Insight Reports, and a Phase 0 Memory Audit pilot.
@@ -72,6 +72,17 @@ Current code and historical verification show:
   no provider or localhost host permissions and no persistent content script. It queries and
   injects the matching adapter into the active ChatGPT or Claude tab only after the user invokes
   Save from the popup or the browser action shortcut.
+- After a successful explicit Save, the same authorized document receives a page-lifetime
+  reminder controller. It observes structural provider identity and complete assistant-turn
+  counts without reading message text, waits for one new assistant response and 30 seconds of
+  conversation inactivity, then shows a non-modal prompt and per-tab `SAVE` badge. The prompt
+  auto-hides after eight seconds while the badge remains; explicit Save or dismissal clears both,
+  and dismissal re-arms only after another assistant response.
+- Reminder Save performs a fresh whole-conversation read only from the already authorized
+  isolated world, validates the sender tab, provider, and conversation identity in the background
+  worker, and reuses the bounded Native Messaging path. Reminder state is not stored locally or
+  in extension storage; navigation, changed DOM, browser restart, and page closure clear or
+  abandon it, while streaming output defers evaluation.
 - The ChatGPT adapter fails closed unless it can identify one supported HTTPS conversation URL,
   a signed-in page, consecutive complete conversation turns, a user-authored first turn, unique
   message identities, non-empty content, and bounded normalized output.
@@ -96,16 +107,52 @@ The preceding list describes current software, not completion of the Context Lib
 
 ## In progress
 
-- TASK-000 and TASK-001 are integrated and verified.
+- TASK-000, TASK-001, and TASK-002 are integrated and verified.
 - PHASE-001 remains active because the explicit web-chat Save and Use loop and durable
   automatic batching are not implemented.
-- The first four TASK-002 slices complete the provider-neutral local capture contract, the
-  secure Chrome/Edge Native Messaging scaffold, and explicit ChatGPT and Claude
-  whole-conversation Save.
-- The next bounded TASK-002 slice is the non-blocking unsaved-conversation reminder after an
-  explicit Reweave action on the tab. TASK-003 remains the later Use Reweave flow.
+- The five TASK-002 slices complete the provider-neutral local capture contract, secure
+  Chrome/Edge Native Messaging scaffold, explicit ChatGPT and Claude whole-conversation Save,
+  and non-blocking page-lifetime unsaved reminders.
+- TASK-003 is next. Its first bounded slice is the authenticated provider-neutral Context
+  assembly contract and local endpoint for an explicit Use Reweave request.
 
 ## Verification evidence
+
+### Fresh in the TASK-002 unsaved-reminder slice
+
+- Ruff passed across the repository; all 152 Python tests passed with one pre-existing
+  Starlette/httpx deprecation warning; all 45 frontend tests passed; extension JavaScript syntax,
+  TypeScript, the Vite production frontend build, strict Full project-document validation, and
+  `git diff --check` passed.
+- Deterministic ChatGPT and Claude coverage confirms structural reminder snapshots do not clone
+  or read message content, the exact 30-second inactivity threshold, new-assistant detection,
+  eight-second prompt auto-hide with persistent badge, dismissal and re-arming, explicit
+  re-Save, streaming deferral, changed-DOM and identity failure, app-unavailable retry, sender
+  validation, navigation clearing, and browser-startup badge clearing.
+- A one-second identity-only page-lifetime check closes the SPA navigation gap without reading
+  conversation content; both providers stop and clear state when only the conversation URL
+  changes and the DOM remains still.
+- The production manifest remains limited to `nativeMessaging`, `activeTab`, and `scripting`,
+  with no provider host permission, static content script, or extension storage. The isolated
+  browser harness added both provider host permissions and shortened reminder timers only to its
+  temporary copy because programmatic popup activation does not confer `activeTab`.
+- Google Chrome for Testing 145 saved the two-message ChatGPT fixture through the newly packaged
+  app and native host, displayed the reminder and `SAVE` badge, updated the archive to four
+  messages through the in-page Save button, cleared on dismissal, and re-armed after another
+  assistant response. With the app stopped, reminder Save remained retryable and did not write;
+  subsequent navigation cleared the badge.
+- Installed Microsoft Edge 150 saved the four-message Claude fixture, displayed the same
+  non-blocking reminder, and updated the archive to six messages through the in-page Save button.
+  The combined isolated archive contained exactly two conversations and ten messages after both
+  successful flows and the failed unavailable-app attempt.
+- Browser screenshots confirmed the light reminder card at the lower-right without obscuring
+  fixture content, one 44-pixel primary Save action, and a clear secondary dismissal action.
+- A fresh clean PyInstaller build completed successfully and created
+  `dist/Reweave/Reweave.exe` (17,374,427 bytes) and
+  `dist/Reweave/ReweaveNativeHost.exe` (2,233,179 bytes). The packaged app published its
+  authenticated bridge and served both browser flows before the unavailable-app scenario.
+- Temporary browser profiles, packaged app and native-host processes, per-user Chrome and Edge
+  registry keys, native-host manifest, and isolated application data were removed after QA.
 
 ### Fresh in the TASK-002 explicit Claude Save slice
 
@@ -322,8 +369,8 @@ These are historical merge records and were not rerun by the current documentati
   exist, but durable batching/retry, full Core Self behavior, automatic routing, Knowledge
   Graph, correction learning, and exception Review do not yet exist.
 - The local whole-conversation capture contract, secure Chrome/Edge extension bridge, ChatGPT and
-  Claude DOM adapters, and explicit Save paths now exist, but Use Reweave and non-blocking
-  reminders do not yet exist.
+  Claude DOM adapters, explicit Save paths, and page-lifetime unsaved reminders now exist, but
+  Use Reweave does not yet exist.
 - Current Insight Reports have not yet been migrated into Conversation Brief and analysis-history behavior.
 - Current archive search has not yet been reframed or connected as Sources / Evidence Search for Context.
 - Current archive backup and removal do not yet satisfy the Context Library's encrypted
@@ -332,29 +379,29 @@ These are historical merge records and were not rerun by the current documentati
 
 ## Blockers
 
-- None for TASK-002.
+- None for TASK-003.
 - The public v1 scope freeze and encrypted-synchronization timing are intentionally deferred to PHASE-004 and do not block the current phase.
 
 ## Next task
 
-- TASK-002: Implement the ChatGPT and Claude whole-conversation Save to Reweave extension
-  flow with idempotent update and non-blocking save reminders.
-- Current bounded slice: Implement a non-blocking unsaved-conversation reminder for ChatGPT and
-  Claude after the user has explicitly saved the tab. Install only an action-triggered,
-  page-lifetime observer; keep the production manifest free of provider host permissions and
-  persistent content scripts; retain only the minimum ephemeral saved baseline and dismissal
-  state needed for the reminder. TASK-003 will later reuse this boundary after Use Reweave.
-- Acceptance: After a successful Save, meaningful complete new turns or the accepted inactivity
-  condition produce a small non-blocking Save prompt and extension badge; clicking the reminder
-  reuses explicit whole-conversation Save and clears it; dismissing suppresses it until
-  substantial new complete content exists; navigation, unsupported or changed DOM, streaming
-  output, app unavailability, and browser restart fail closed without capture or durable browsing
-  history; no provider page is read before the first explicit Reweave action.
-- Verify: Add deterministic ChatGPT and Claude fixture tests for new-turn, inactivity, dismissal,
-  navigation, streaming, and changed-DOM states; retain permission and pre-action access
-  regressions; run full repository gates and strict document validation; create a fresh clean
-  Windows executable; and exercise Chrome and Edge packaged reminder, dismissal, Save, and
-  unavailable-app scenarios against isolated data.
+- TASK-003: Implement the user-requested Use Reweave flow using the current chat and drafted
+  request, with explicit context insertion and on-request refresh.
+- Current bounded slice: Define and implement the authenticated provider-neutral Context assembly
+  request/response contract and local endpoint. Accept only one explicit, bounded current-chat
+  payload plus a non-empty draft; retrieve relevant allowed existing Context Items within a
+  deterministic context budget; return insertion-ready text with compact item provenance; and do
+  not yet add provider DOM insertion or automatic refresh.
+- Acceptance: ChatGPT and Claude shaped inputs normalize to one provider-neutral request; invalid,
+  oversized, empty-draft, unauthenticated, unknown-scope, and unavailable-context cases fail
+  closed without archive or Context writes; allowed scope and sensitivity constraints are applied
+  before ranking; the result is deterministic, budget bounded, source attributable, and contains
+  no duplicate item; the current chat and draft are not persisted; and no extension page read
+  occurs without the later explicit Use action.
+- Verify: Add focused domain and authenticated API tests for both provider payloads, validation,
+  scope and sensitivity filtering, ranking, deduplication, budgeting, provenance, and no-write
+  behavior; retain all Save/reminder regressions; run full repository gates and strict document
+  validation; create a fresh clean Windows executable; and smoke the packaged endpoint against an
+  isolated populated Context database.
 
 ## Resume checklist
 

@@ -404,3 +404,42 @@ The following entries record the current accepted product direction.
   or a first-party provider integration offers equally explicit access with fewer permissions.
 - Supersedes: None
 - Superseded by: None
+
+### DEC-025 — Keep unsaved reminders inside the explicit tab lifetime
+
+- Status: accepted
+- Date: 2026-07-21
+- Initiated by: Agent-owned architecture within accepted TASK-002
+- Context: DEC-015 requires a non-blocking unsaved-conversation prompt and extension badge,
+  while DEC-024 forbids provider host permissions, always-loaded content scripts, and page reads
+  before the user explicitly invokes Reweave.
+- User intent/value protected: Remind the user after Reweave is invited into a conversation
+  without turning the extension into passive browsing or durable activity tracking.
+- Intervention: None; the user delegated low-level implementation decisions and requested the
+  next documented TASK-002 slice.
+- Options considered: Persistent provider permissions with static content scripts, a timer-only
+  badge that cannot detect meaningful new work, or an action-injected observer limited to the
+  already authorized document.
+- Decision: After a successful explicit Save, keep one isolated, page-lifetime reminder
+  controller in that document. Observe only provider identity, stable role markers, complete
+  message counts, and complete assistant-response counts; do not read or retain message text for
+  reminder detection. One new complete assistant response followed by 30 seconds without DOM
+  activity is meaningful new content. Show a non-modal prompt and per-tab `SAVE` badge, auto-hide
+  the prompt while retaining the badge, and treat dismissal as the new assistant-count baseline.
+  Read and validate the whole conversation again only when the user presses the reminder's Save
+  button. Keep no reminder data in `chrome.storage` or the local app.
+- Consequences: A conversation receives reminders only after its first explicit Reweave action;
+  TASK-003 may start the same controller after Use Reweave. Same-tab conversation changes,
+  navigation, changed DOM, browser restart, and tab closure clear or abandon reminder state.
+  Streaming or incomplete output never triggers a reminder. The toolbar badge may outlive the
+  short prompt, but both clear after Save or explicit dismissal.
+- Implementation evidence: Deterministic ChatGPT and Claude tests verify structural snapshots
+  without content cloning, timing, dismissal, re-arming, explicit re-Save, sender validation,
+  streaming and DOM uncertainty, navigation, startup, and app-unavailable behavior. Packaged
+  Chrome and Edge flows verified the prompt, badge, dismissal, successful re-Save, failed
+  unavailable-app retry without persistence, and complete cleanup against isolated data.
+- Reconsider when: Browser action or injected-script lifetimes change, structural provider DOM
+  signals become unreliable, or dogfooding shows that a 30-second quiet interval is too early or
+  too late.
+- Supersedes: None
+- Superseded by: None

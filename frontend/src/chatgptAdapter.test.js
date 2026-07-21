@@ -18,11 +18,12 @@ function fixture(name) {
 
 function runAdapter(html, url = "https://chatgpt.com/c/conversation-42") {
   const { document } = parseHTML(html);
-  return vm.runInNewContext(adapterSource, {
+  const context = {
     document,
     location: new URL(url),
     Set,
-  });
+  };
+  return vm.runInNewContext(adapterSource, context);
 }
 
 function loadBackground({ extraction, encoder = TextEncoder } = {}) {
@@ -31,6 +32,9 @@ function loadBackground({ extraction, encoder = TextEncoder } = {}) {
     nativeMessages: [],
     tabQueries: 0,
     injections: [],
+    tabMessages: [],
+    badges: [],
+    titles: [],
   };
   const chrome = {
     runtime: {
@@ -40,6 +44,7 @@ function loadBackground({ extraction, encoder = TextEncoder } = {}) {
           listener = registered;
         },
       },
+      onStartup: { addListener() {} },
       sendNativeMessage(_host, message, callback) {
         calls.nativeMessages.push(message);
         if (message.type === "ping") {
@@ -57,15 +62,38 @@ function loadBackground({ extraction, encoder = TextEncoder } = {}) {
       },
     },
     tabs: {
+      onUpdated: { addListener() {} },
       query(_query, callback) {
         calls.tabQueries += 1;
         callback([{ id: 17, url: "https://chatgpt.com/c/conversation-42" }]);
+      },
+      sendMessage(tabId, message, callback) {
+        calls.tabMessages.push({ tabId, message });
+        callback({ ok: true });
       },
     },
     scripting: {
       executeScript(options, callback) {
         calls.injections.push(options);
-        callback([{ frameId: 0, result: extraction }]);
+        callback([
+          {
+            frameId: 0,
+            result: options.files[0] === "reminder.js" ? { ok: true } : extraction,
+          },
+        ]);
+      },
+    },
+    action: {
+      setBadgeBackgroundColor(options, callback) {
+        callback?.();
+      },
+      setBadgeText(options, callback) {
+        calls.badges.push(options);
+        callback?.();
+      },
+      setTitle(options, callback) {
+        calls.titles.push(options);
+        callback?.();
       },
     },
   };
@@ -118,6 +146,29 @@ describe("ChatGPT explicit Save adapter", () => {
     ).toBe("unsupported_page");
   });
 
+  it("counts complete turns for reminders without cloning or reading message content", () => {
+    const { document } = parseHTML(fixture("chatgpt_current_conversation.html"));
+    const context = {
+      document,
+      location: new URL("https://chatgpt.com/c/conversation-42"),
+      Set,
+    };
+    vm.runInNewContext(adapterSource, context);
+    for (const turn of document.querySelectorAll('[data-testid^="conversation-turn-"]')) {
+      turn.cloneNode = () => {
+        throw new Error("content was read");
+      };
+    }
+
+    expect(context.__reweaveProviderAdapter.snapshot()).toEqual({
+      ok: true,
+      provider: "chatgpt",
+      external_id: "conversation-42",
+      message_count: 2,
+      assistant_count: 1,
+    });
+  });
+
   it("rejects missing leading or middle turns instead of saving a partial conversation", () => {
     const current = fixture("chatgpt_current_conversation.html");
     const missingBeginning = current
@@ -149,6 +200,18 @@ describe("ChatGPT explicit Save adapter", () => {
     expect(calls.tabQueries).toBe(1);
     expect(calls.injections).toEqual([
       { target: { tabId: 17 }, files: ["chatgpt-adapter.js"] },
+      { target: { tabId: 17 }, files: ["reminder.js"] },
+    ]);
+    expect(calls.tabMessages).toEqual([
+      {
+        tabId: 17,
+        message: {
+          type: "reweave:start-reminder",
+          provider: "chatgpt",
+          external_id: "conversation-42",
+          assistant_count: 1,
+        },
+      },
     ]);
     expect(calls.nativeMessages.at(-1)).toEqual({
       type: "capture_conversation",

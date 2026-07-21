@@ -30,6 +30,19 @@
     );
   }
 
+  function pageIsStreaming() {
+    return Boolean(
+      document.querySelector(
+        [
+          '[data-testid*="stop-button"]',
+          '[data-testid*="stop-response"]',
+          'button[aria-label*="Stop generating"]',
+          'button[aria-label*="Stop response"]',
+        ].join(","),
+      ),
+    );
+  }
+
   function turnNodes() {
     const articleTurns = Array.from(
       document.querySelectorAll('article[data-testid^="conversation-turn-"]'),
@@ -145,6 +158,50 @@
     return `${conversationId}:turn:${position}`;
   }
 
+  function reminderSnapshot() {
+    const conversationId = conversationIdFromLocation();
+    if (!conversationId) {
+      return failure(isLoggedOut() ? "logged_out" : "unsupported_page");
+    }
+
+    const turns = turnNodes();
+    if (!turns.length) {
+      return failure(isLoggedOut() ? "logged_out" : "changed_dom");
+    }
+    const sequenceError = completeTurnSequence(turns);
+    if (sequenceError) {
+      return failure(sequenceError);
+    }
+
+    const roles = [];
+    for (const turn of turns) {
+      const roleResult = roleForTurn(turn);
+      if (!roleResult) {
+        return failure("changed_dom");
+      }
+      roles.push(roleResult.role);
+    }
+    if (roles[0] !== "user") {
+      return failure("incomplete_conversation");
+    }
+    if (pageIsStreaming()) {
+      return {
+        ok: false,
+        reason: "streaming",
+        provider: "chatgpt",
+        external_id: conversationId,
+      };
+    }
+
+    return {
+      ok: true,
+      provider: "chatgpt",
+      external_id: conversationId,
+      message_count: turns.length,
+      assistant_count: roles.filter((role) => role === "assistant").length,
+    };
+  }
+
   function conversationTitle() {
     const rawTitle = document.title
       .replace(/\s*[|–—-]\s*ChatGPT\s*$/i, "")
@@ -153,56 +210,55 @@
     return rawTitle || "Untitled ChatGPT conversation";
   }
 
-  const conversationId = conversationIdFromLocation();
-  if (!conversationId) {
-    return failure(isLoggedOut() ? "logged_out" : "unsupported_page");
-  }
-
-  const turns = turnNodes();
-  if (!turns.length) {
-    return failure(isLoggedOut() ? "logged_out" : "changed_dom");
-  }
-  const sequenceError = completeTurnSequence(turns);
-  if (sequenceError) {
-    return failure(sequenceError);
-  }
-
-  const messages = [];
-  for (const [index, turn] of turns.entries()) {
-    const roleResult = roleForTurn(turn);
-    if (!roleResult) {
-      return failure("changed_dom");
+  function captureConversation() {
+    const snapshot = reminderSnapshot();
+    if (!snapshot.ok) {
+      return failure(snapshot.reason);
     }
-    const content = contentForTurn(turn, roleResult.roleNode, roleResult.role);
-    if (!content) {
+
+    const turns = turnNodes();
+    const messages = [];
+    for (const [index, turn] of turns.entries()) {
+      const roleResult = roleForTurn(turn);
+      if (!roleResult) {
+        return failure("changed_dom");
+      }
+      const content = contentForTurn(turn, roleResult.roleNode, roleResult.role);
+      if (!content) {
+        return failure("invalid_conversation");
+      }
+      messages.push({
+        external_id: externalMessageId(turn, snapshot.external_id, index),
+        role: roleResult.role,
+        content,
+        timestamp: timestampForTurn(turn),
+      });
+    }
+
+    if (new Set(messages.map((message) => message.external_id)).size !== messages.length) {
       return failure("invalid_conversation");
     }
-    messages.push({
-      external_id: externalMessageId(turn, conversationId, index),
-      role: roleResult.role,
-      content,
-      timestamp: timestampForTurn(turn),
-    });
+
+    const timestamps = messages.map((message) => message.timestamp).filter(Boolean);
+    return {
+      ok: true,
+      adapter_version: 1,
+      capture: {
+        provider: "chatgpt",
+        external_id: snapshot.external_id,
+        title: conversationTitle(),
+        created_at: timestamps[0] || null,
+        updated_at: timestamps[timestamps.length - 1] || null,
+        messages,
+      },
+    };
   }
 
-  if (messages[0]?.role !== "user") {
-    return failure("incomplete_conversation");
-  }
-  if (new Set(messages.map((message) => message.external_id)).size !== messages.length) {
-    return failure("invalid_conversation");
-  }
+  globalThis.__reweaveProviderAdapter = Object.freeze({
+    provider: "chatgpt",
+    capture: captureConversation,
+    snapshot: reminderSnapshot,
+  });
 
-  const timestamps = messages.map((message) => message.timestamp).filter(Boolean);
-  return {
-    ok: true,
-    adapter_version: 1,
-    capture: {
-      provider: "chatgpt",
-      external_id: conversationId,
-      title: conversationTitle(),
-      created_at: timestamps[0] || null,
-      updated_at: timestamps[timestamps.length - 1] || null,
-      messages,
-    },
-  };
+  return captureConversation();
 })();
