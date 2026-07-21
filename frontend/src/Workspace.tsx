@@ -18,6 +18,7 @@ import {
   FileText,
   FileUp,
   FolderInput,
+  Compass,
   KeyRound,
   Library,
   Loader2,
@@ -39,9 +40,10 @@ import {
 } from "./MarkdownContent";
 import { LibraryView, OnboardingWizard } from "./ArchiveManagement";
 import { MemoryAuditView, type AuditLLMSettings } from "./MemoryAudit";
+import { ContextWorkspace } from "./ContextWorkspace";
 import { HighlightedText, extractHighlightTerms } from "./textHighlight";
 
-type View = "library" | "audit" | "search" | "reports" | "import" | "settings";
+type View = "context" | "library" | "audit" | "search" | "reports" | "import" | "settings";
 type SearchMode = "auto" | "keyword" | "semantic";
 
 type Excerpt = {
@@ -235,7 +237,7 @@ const initialModelLoad: ModelLoadState = {
 };
 
 export function Workspace() {
-  const [activeView, setActiveView] = useState<View>("search");
+  const [activeView, setActiveView] = useState<View>("context");
   const [query, setQuery] = useState("");
   const [searchMode, setSearchMode] = useState<SearchMode>("auto");
   const [modeUsed, setModeUsed] = useState("keyword");
@@ -879,6 +881,9 @@ export function Workspace() {
         conversationCount={archiveConversationCount}
         onNavigate={switchView}
       />
+      {activeView === "context" && (
+        <ContextWorkspace onOpenLibrary={() => setActiveView("library")} />
+      )}
       {activeView === "library" && (
         <>
           <LibraryView
@@ -1063,6 +1068,7 @@ function Navigation({
   onNavigate: (view: View) => void;
 }) {
   const items: Array<{ view: View; label: string; icon: React.ReactNode }> = [
+    { view: "context", label: "Context", icon: <Compass size={19} /> },
     { view: "library", label: "Library", icon: <Library size={19} /> },
     { view: "audit", label: "Audit", icon: <ShieldCheck size={19} /> },
     { view: "search", label: "Search", icon: <Search size={19} /> },
@@ -1072,7 +1078,7 @@ function Navigation({
   ];
   return (
     <aside className="navigationPane">
-      <button className="wordmark" type="button" onClick={() => onNavigate("search")}>
+      <button className="wordmark" type="button" onClick={() => onNavigate("context")}>
         <span>R</span>
         <strong>Reweave</strong>
       </button>

@@ -23,6 +23,13 @@ import { OnboardingWizard } from "./ArchiveManagement";
 import { MemoryAuditView } from "./MemoryAudit";
 import { isAuditItemReviewed, manualClaimsFromText } from "./memoryAuditHelpers";
 import { Workspace } from "./Workspace";
+import {
+  buildContextScopeGroups,
+  contextBriefEntries,
+  contextHomeItems,
+  ContextWorkspace,
+  type ContextItem
+} from "./ContextWorkspace";
 
 const result: SearchResult = {
   id: "conversation-1",
@@ -219,17 +226,92 @@ describe("frontend state helpers", () => {
     expect(html).toContain("Use one item per line");
   });
 
-  it("starts in the dedicated search workspace with shared primary navigation", () => {
+  it("starts in Context Home with shared primary navigation", () => {
     const html = renderToStaticMarkup(createElement(Workspace));
 
-    expect(html).toContain("Search your archive");
-    expect(html).toContain("Sources for insight");
+    expect(html).toContain("Linked Context Library");
+    expect(html).toContain("Gathering your Context Library");
+    expect(html).toContain("Context");
     expect(html).toContain("Library");
     expect(html).toContain("Audit");
     expect(html).toContain("Reports");
     expect(html).toContain("Import");
     expect(html).toContain("Settings");
     expect(html).not.toContain("Report outline");
+  });
+
+  it("renders Context Home and Explorer controls before local data loads", () => {
+    const html = renderToStaticMarkup(
+      createElement(ContextWorkspace, { onOpenLibrary: () => undefined })
+    );
+
+    expect(html).toContain('role="tablist"');
+    expect(html).toContain('aria-selected="true"');
+    expect(html).toContain("Home");
+    expect(html).toContain("Explorer");
+    expect(html).toContain("Loading source-grounded briefs and items from this device");
+  });
+
+  it("keeps one linked Context Item discoverable in each of its scopes", () => {
+    const item: ContextItem = {
+      id: "context-1",
+      canonical_text: "Use relationship labels for links.",
+      item_type: "decision",
+      epistemic_kind: "observed",
+      confidence: 0.94,
+      sensitivity: "normal",
+      status: "active",
+      current_version: 1,
+      created_at: "2026-07-21T00:00:00Z",
+      updated_at: "2026-07-21T00:00:00Z",
+      last_confirmed_at: null,
+      stale_at: null,
+      scopes: [
+        { scope_type: "work", scope_key: "", confidence: 0.94, created_at: "2026-07-21T00:00:00Z" },
+        { scope_type: "project", scope_key: "Reweave", confidence: 0.94, created_at: "2026-07-21T00:00:00Z" }
+      ],
+      evidence: [],
+      versions: [],
+      links: []
+    };
+    const groups = buildContextScopeGroups([item]);
+
+    expect(groups.find((group) => group.key === "work")?.items).toEqual([item]);
+    expect(groups.find((group) => group.key === "project:Reweave")?.items).toEqual([item]);
+    expect(contextHomeItems([item], ["decision"])).toEqual([item]);
+    expect(groups.find((group) => group.key === "core_self")?.items).toEqual([]);
+  });
+
+  it("keeps Brief-only decisions visible when extraction creates no Context Items", () => {
+    const entries = contextBriefEntries([
+      {
+        id: "brief-1",
+        source_conversation_id: "conversation-1",
+        source_record_id: "conversation-1",
+        source_provider: "chatgpt",
+        source_title: "Reweave planning",
+        source_created_at: "2026-07-21T00:00:00Z",
+        main_subject: "Context navigation",
+        user_goal: "Plan the first Context view.",
+        important_outcomes: [],
+        decisions: ["Use one linked model for Home and Explorer."],
+        lessons: [],
+        unresolved_questions: [],
+        actions: [],
+        analysis_mode: "project",
+        analysis_status: "complete",
+        created_at: "2026-07-21T00:00:00Z",
+        updated_at: "2026-07-21T00:00:00Z",
+        context_item_ids: [],
+        item_count: 0
+      }
+    ], "decisions");
+
+    expect(entries).toEqual([{
+      id: "brief-1:decisions:0",
+      text: "Use one linked model for Home and Explorer.",
+      sourceTitle: "Reweave planning"
+    }]);
   });
 
   it("renders a first-run wizard with local privacy and export guidance", () => {

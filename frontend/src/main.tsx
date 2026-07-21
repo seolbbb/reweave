@@ -4,6 +4,7 @@ import { Workspace } from "./Workspace";
 import "./styles.css";
 import "./polish.css";
 import "./memoryAudit.css";
+import "./contextWorkspace.css";
 
 type Excerpt = {
   conversation_id: string;
