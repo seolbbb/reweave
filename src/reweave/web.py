@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -12,7 +13,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr
@@ -59,6 +60,7 @@ from reweave.semantic import SearchEngine, SemanticIndex, SemanticUnavailableErr
 
 UPLOAD_FILES = File(...)
 UPLOAD_BACKUP = File(...)
+BRIDGE_TOKEN_HEADER = Header(default=None, alias="X-Reweave-Bridge-Token")
 
 
 class ImportRequest(BaseModel):
@@ -190,6 +192,7 @@ def create_app(
     db_path: Path,
     static_dir: Path | None = None,
     data_dir: Path | None = None,
+    extension_bridge_token: str | None = None,
 ) -> FastAPI:
     """Create the FastAPI app."""
     app = FastAPI(title="Reweave")
@@ -231,6 +234,15 @@ def create_app(
     def update_context_job(job_id: str, **changes: Any) -> None:
         with context_jobs_lock:
             context_jobs[job_id].update(changes)
+
+    def require_extension_bridge_token(provided_token: str | None) -> None:
+        if extension_bridge_token is None:
+            raise HTTPException(status_code=503, detail="The extension bridge is not active.")
+        if provided_token is None or not secrets.compare_digest(
+            provided_token.encode("utf-8"),
+            extension_bridge_token.encode("utf-8"),
+        ):
+            raise HTTPException(status_code=403, detail="The extension bridge token is invalid.")
 
     def run_insight_job(
         job_id: str,
@@ -861,6 +873,16 @@ def create_app(
             "inserted_messages": summary.inserted_messages,
             "updated_messages": summary.updated_messages,
             "invalidated_embeddings": summary.invalidated_embeddings,
+        }
+
+    @app.post("/api/extension/handshake")
+    def extension_handshake(
+        x_reweave_bridge_token: str | None = BRIDGE_TOKEN_HEADER,
+    ) -> dict[str, Any]:
+        require_extension_bridge_token(x_reweave_bridge_token)
+        return {
+            "status": "ready",
+            "protocol_version": 1,
         }
 
     @app.get("/api/llm/profiles")

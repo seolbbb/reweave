@@ -66,6 +66,17 @@ Current code and historical verification show:
 - `POST /api/capture/conversations` persists valid captures immediately without an LLM key,
   reuses the archive's transactional import, FTS, and embedding-invalidation path, and reports
   created, updated, or unchanged outcomes without returning raw conversation content.
+- A permission-minimal Manifest V3 extension scaffold loads unpacked in Chrome and Edge with
+  only `nativeMessaging`; it has no provider or localhost host permissions, content scripts,
+  or provider page-reading code in this slice.
+- The desktop app publishes an atomic, short-lived runtime descriptor with an ephemeral token,
+  protects the loopback availability handshake with that token, and removes only its own
+  descriptor during an orderly shutdown.
+- A separately packaged `ReweaveNativeHost.exe` implements bounded native-message framing,
+  reads the private runtime descriptor, probes the authenticated loopback handshake, and returns
+  only ready, unavailable, incompatible, or malformed status without exposing the token or port.
+- Development registration scripts create and remove the exact per-user Chrome and Edge Native
+  Messaging registry entries and restrict the host manifest to explicit extension origins.
 
 The preceding list describes current software, not completion of the Context Library product contract.
 
@@ -74,12 +85,37 @@ The preceding list describes current software, not completion of the Context Lib
 - TASK-000 and TASK-001 are integrated and verified.
 - PHASE-001 remains active because the explicit web-chat Save and Use loop and durable
   automatic batching are not implemented.
-- The first TASK-002 slice completes the provider-neutral local whole-conversation capture and
-  idempotent persistence contract shared by future ChatGPT and Claude extension adapters.
-- The next bounded TASK-002 slice is a secure Chrome/Edge extension-to-local-app connection
-  scaffold and availability handshake; provider DOM adapters and Save UI follow after it.
+- The first two TASK-002 slices complete the provider-neutral local capture contract and the
+  secure Chrome/Edge Native Messaging scaffold and availability handshake.
+- The next bounded TASK-002 slice is the explicit ChatGPT whole-conversation Save path; the
+  Claude adapter and non-blocking unsaved reminder follow after it.
 
 ## Verification evidence
+
+### Fresh in the TASK-002 Native Messaging scaffold slice
+
+- 14 focused extension bridge and manifest tests passed for atomic descriptor ownership,
+  environment discovery, token authorization, inactive bridge behavior, fragmented and invalid
+  native-message framing, ready/unavailable/incompatible/malformed status, response secrecy,
+  permission minimization, no provider page access, and accessible popup states.
+- Ruff passed across the repository.
+- 146 Python tests passed with one pre-existing Starlette/httpx deprecation warning.
+- 23 frontend tests passed; frontend assets were not rebuilt because no `frontend/` file changed.
+- The unpacked Manifest V3 extension loaded as `Reweave` in Chrome for Testing and the installed
+  Microsoft Edge. Both used extension ID `kkpjbndfdpobgjobejohcegnebnnknej` for the tested path.
+- With temporary per-user Native Messaging registration and isolated app data, Chrome and Edge
+  rendered `Reweave is ready` while the packaged app ran; after it stopped, Chrome rendered
+  `Open Reweave to continue` and a 44-pixel Retry action. The popup had no horizontal overflow,
+  dark mode and reduced motion were active when requested, and the extension never received the
+  loopback port or token.
+- A fresh clean PyInstaller build completed successfully and created
+  `dist/Reweave/Reweave.exe` (17,374,279 bytes) and
+  `dist/Reweave/ReweaveNativeHost.exe` (2,231,325 bytes).
+- The final packaged native host accepted an exact binary-framed ping, emitted one clean framed
+  response with no stderr or trailing stdout, reported `app_not_running` from isolated data,
+  and created no app-data files or directories while the app was unavailable.
+- Temporary browser sessions, packaged app processes, per-user Chrome and Edge registry keys,
+  native-host manifests, and isolated test data were removed after verification.
 
 ### Fresh in the TASK-002 local capture contract slice
 
@@ -210,9 +246,9 @@ These are historical merge records and were not rerun by the current documentati
   backend analysis/read APIs, Context Home, Explorer, and source-evidence navigation now
   exist, but durable batching/retry, full Core Self behavior, automatic routing, Knowledge
   Graph, correction learning, and exception Review do not yet exist.
-- The local whole-conversation capture contract now exists, but a Chrome/Edge extension,
-  secure local connection handshake, ChatGPT and Claude DOM adapters, explicit Save and Use
-  actions, and non-blocking reminders do not yet exist.
+- The local whole-conversation capture contract and secure Chrome/Edge extension availability
+  scaffold now exist, but ChatGPT and Claude DOM adapters, explicit Save and Use actions, and
+  non-blocking reminders do not yet exist.
 - Current Insight Reports have not yet been migrated into Conversation Brief and analysis-history behavior.
 - Current archive search has not yet been reframed or connected as Sources / Evidence Search for Context.
 - Current archive backup and removal do not yet satisfy the Context Library's encrypted
@@ -228,21 +264,19 @@ These are historical merge records and were not rerun by the current documentati
 
 - TASK-002: Implement the ChatGPT and Claude whole-conversation Save to Reweave extension
   flow with idempotent update and non-blocking save reminders.
-- Current bounded slice: Create the Manifest V3 Chrome/Edge extension scaffold and the secure
-  local connection and availability handshake it will use before reading any provider page.
-  Select the local transport only after comparing browser support, discovery, origin exposure,
-  port conflicts, and packaged-app behavior. ChatGPT and Claude DOM reading, Save UI, and
-  reminders remain later TASK-002 slices.
-- Acceptance: The extension can determine whether the packaged Reweave app is available and
-  can reach only the intended local service through the selected transport; ordinary web pages
-  do not gain capture access; unavailable, conflicting, and malformed handshake states produce
-  an actionable extension status; the scaffold loads in both Chrome and Edge without reading
-  page content or requesting broader host permissions than this handshake needs.
-- Verify: Add automated transport, origin/authorization, discovery, unavailable-app, conflict,
-  and malformed-handshake tests plus extension manifest checks; run the full repository gates
-  and strict document validator; create `dist/Reweave/Reweave.exe` with the required clean
-  PyInstaller command; load the unpacked extension in Chromium; and smoke the packaged handshake
-  with both available and unavailable local-app states.
+- Current bounded slice: Implement an explicit ChatGPT whole-conversation Save action using the
+  existing Native Messaging boundary. Read the active ChatGPT page only after the user clicks
+  Save; normalize and send the complete ordered conversation through the packaged native host
+  to the existing capture contract. Claude support and the unsaved reminder remain later slices.
+- Acceptance: On a supported ChatGPT conversation, one explicit Save stores the whole current
+  conversation and reports created, updated, or unchanged; repeated Save is idempotent; no
+  provider page is read before the click; unsupported, logged-out, changed-DOM, unavailable-app,
+  oversized, and invalid-conversation states are actionable and cause no partial archive write;
+  permissions remain limited to the smallest action-triggered ChatGPT access required.
+- Verify: Add fixture-based ChatGPT adapter and normalization tests, action-gating and permission
+  checks, native-host capture forwarding and size/error tests, full repository gates and strict
+  document validation, a fresh clean Windows executable build, unpacked Chrome and Edge Save
+  scenarios, and packaged created/unchanged/invalid capture smokes against isolated data.
 
 ## Resume checklist
 
