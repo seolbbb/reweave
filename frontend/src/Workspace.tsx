@@ -25,6 +25,7 @@ import {
   Save,
   Search,
   Settings,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Trash2,
@@ -37,9 +38,10 @@ import {
   type MarkdownHeading
 } from "./MarkdownContent";
 import { LibraryView, OnboardingWizard } from "./ArchiveManagement";
+import { MemoryAuditView, type AuditLLMSettings } from "./MemoryAudit";
 import { HighlightedText, extractHighlightTerms } from "./textHighlight";
 
-type View = "library" | "search" | "reports" | "import" | "settings";
+type View = "library" | "audit" | "search" | "reports" | "import" | "settings";
 type SearchMode = "auto" | "keyword" | "semantic";
 
 type Excerpt = {
@@ -123,6 +125,7 @@ type ImportSummary = {
 type AppPaths = {
   data_dir: string;
   db_path: string;
+  memory_audit_db_path: string;
   imports_dir: string;
   extracted_dir: string;
   models_dir: string;
@@ -292,6 +295,14 @@ export function Workspace() {
   const archiveConversationCount = sourceFacets.reduce((total, facet) => total + facet.conversations, 0);
   const archiveMessageCount = sourceFacets.reduce((total, facet) => total + facet.messages, 0);
   const modelReady = activeProfile?.connected && modelLoad.status === "success" && Boolean(model);
+  const auditLLMSettings: AuditLLMSettings | null = activeProfile && model
+    ? {
+        profile_id: activeProfile.id,
+        model,
+        max_context_chars: maxContextChars,
+        temperature
+      }
+    : null;
 
   useEffect(() => {
     void loadInitialData();
@@ -891,6 +902,28 @@ export function Workspace() {
           )}
         </>
       )}
+      {activeView === "audit" && (
+        <>
+          <MemoryAuditView
+            modelReady={Boolean(modelReady)}
+            llmSettings={auditLLMSettings}
+            onOpenEvidence={(conversationId, messageIndex) => void openDetail(conversationId, messageIndex)}
+            onOpenSettings={() => setActiveView("settings")}
+          />
+          {detail && (
+            <div className="libraryDrawerBackdrop" role="presentation" onClick={() => setDetail(null)}>
+              <aside className="libraryDrawerPanel" onClick={(event) => event.stopPropagation()}>
+                <ConversationDrawer
+                  detail={detail}
+                  close={() => setDetail(null)}
+                  targetIndex={detailMessageIndex}
+                  label="Audit evidence"
+                />
+              </aside>
+            </div>
+          )}
+        </>
+      )}
       {activeView === "search" && (
         <SearchView
           query={query}
@@ -1031,6 +1064,7 @@ function Navigation({
 }) {
   const items: Array<{ view: View; label: string; icon: React.ReactNode }> = [
     { view: "library", label: "Library", icon: <Library size={19} /> },
+    { view: "audit", label: "Audit", icon: <ShieldCheck size={19} /> },
     { view: "search", label: "Search", icon: <Search size={19} /> },
     { view: "reports", label: "Reports", icon: <FileText size={19} /> },
     { view: "import", label: "Import", icon: <CloudUpload size={19} /> },
@@ -1122,32 +1156,36 @@ function SearchView(props: SearchViewProps) {
         </header>
         <div className="searchControls">
           <div className="searchInput">
-            <Search size={19} />
-            <input
-              aria-label="Search archive"
-              value={props.query}
-              onChange={(event) => props.setQuery(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && props.runSearch()}
-              placeholder="Search topics, phrases, or ideas"
-            />
-            {props.query && (
-              <button type="button" onClick={() => props.setQuery("")} aria-label="Clear search">
-                <X size={17} />
+            <div className="searchField">
+              <Search size={19} aria-hidden="true" />
+              <input
+                aria-label="Search archive"
+                value={props.query}
+                onChange={(event) => props.setQuery(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && props.runSearch()}
+                placeholder="Search topics, phrases, or ideas"
+              />
+              {props.query && (
+                <button type="button" onClick={() => props.setQuery("")} aria-label="Clear search">
+                  <X size={17} />
+                </button>
+              )}
+            </div>
+            <div className="searchActions">
+              <button className="searchSubmit" type="button" onClick={props.runSearch} disabled={props.busy}>
+                {props.busy ? <Loader2 className="spin" size={17} /> : <Search size={17} />}
+                Search
               </button>
-            )}
-            <button className="searchSubmit" type="button" onClick={props.runSearch} disabled={props.busy}>
-              {props.busy ? <Loader2 className="spin" size={17} /> : <Search size={17} />}
-              Search
-            </button>
-            <button
-              className="askSubmit"
-              type="button"
-              onClick={props.askArchive}
-              disabled={props.answerBusy}
-            >
-              {props.answerBusy ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
-              Ask archive
-            </button>
+              <button
+                className="askSubmit"
+                type="button"
+                onClick={props.askArchive}
+                disabled={props.answerBusy}
+              >
+                {props.answerBusy ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
+                Ask archive
+              </button>
+            </div>
           </div>
           <div className="filterRow">
             <label className="modePicker">

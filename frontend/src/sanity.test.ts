@@ -20,6 +20,8 @@ import {
 } from "./MarkdownContent";
 import { HighlightedText, extractHighlightTerms } from "./textHighlight";
 import { OnboardingWizard } from "./ArchiveManagement";
+import { MemoryAuditView } from "./MemoryAudit";
+import { isAuditItemReviewed, manualClaimsFromText } from "./memoryAuditHelpers";
 import { Workspace } from "./Workspace";
 
 const result: SearchResult = {
@@ -187,12 +189,43 @@ describe("frontend state helpers", () => {
     expect(safeFilename('Insights: AI / "careers"')).toBe("Insights- AI - -careers-");
   });
 
+  it("creates manual audit claims without storing the original pasted block", () => {
+    expect(manualClaimsFromText("- First memory\n2. Second memory\n\n* Third memory")).toEqual([
+      { claim_text: "First memory", search_queries: ["First memory"] },
+      { claim_text: "Second memory", search_queries: ["Second memory"] },
+      { claim_text: "Third memory", search_queries: ["Third memory"] }
+    ]);
+    expect(
+      isAuditItemReviewed({
+        user_statement_kind: "direct_statement",
+        user_evidence_verdict: "supported",
+        user_severity: "low"
+      })
+    ).toBe(true);
+  });
+
+  it("renders the local-first memory audit start flow", () => {
+    const html = renderToStaticMarkup(
+      createElement(MemoryAuditView, {
+        modelReady: false,
+        llmSettings: null,
+        onOpenEvidence: () => undefined,
+        onOpenSettings: () => undefined
+      })
+    );
+
+    expect(html).toContain("Audit what an AI remembers about you");
+    expect(html).toContain("is never stored by Reweave");
+    expect(html).toContain("Use one item per line");
+  });
+
   it("starts in the dedicated search workspace with shared primary navigation", () => {
     const html = renderToStaticMarkup(createElement(Workspace));
 
     expect(html).toContain("Search your archive");
     expect(html).toContain("Sources for insight");
     expect(html).toContain("Library");
+    expect(html).toContain("Audit");
     expect(html).toContain("Reports");
     expect(html).toContain("Import");
     expect(html).toContain("Settings");
