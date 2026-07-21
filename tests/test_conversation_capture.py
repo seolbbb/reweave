@@ -4,7 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+import reweave.context_extraction
 from reweave.archive import ArchiveStore
+from reweave.context_library import ContextLibraryStore
 from reweave.conversation_capture import ConversationCapture
 from reweave.web import create_app
 
@@ -34,8 +36,15 @@ def _payload(provider: str = "chatgpt") -> dict:
 
 
 @pytest.mark.parametrize("provider", ["chatgpt", "claude"])
-def test_capture_api_persists_supported_provider_without_llm_key(tmp_path, provider):
+def test_capture_api_persists_supported_provider_without_llm_key(
+    monkeypatch, tmp_path, provider
+):
     db_path = tmp_path / "archive.db"
+    monkeypatch.setattr(
+        reweave.context_extraction,
+        "create_provider",
+        lambda settings: pytest.fail("Capture must not start provider analysis."),
+    )
     client = TestClient(create_app(db_path, data_dir=tmp_path / "app-data"))
 
     response = client.post("/api/capture/conversations", json=_payload(provider))
@@ -46,6 +55,8 @@ def test_capture_api_persists_supported_provider_without_llm_key(tmp_path, provi
     assert result["outcome"] == "created"
     assert result["message_count"] == 2
     assert result["inserted_messages"] == 2
+    assert result["analysis_queue_job"]["status"] == "pending"
+    assert result["analysis_queue_job"]["attempt_count"] == 0
 
     reopened = ArchiveStore(db_path)
     conversation = reopened.get_conversation(result["conversation_id"])
@@ -92,6 +103,11 @@ def test_repeated_capture_updates_in_place_then_becomes_unchanged(tmp_path):
     assert unchanged.json()["outcome"] == "unchanged"
     assert unchanged.json()["inserted_messages"] == 0
     assert unchanged.json()["updated_messages"] == 0
+    created_job_id = created["analysis_queue_job"]["id"]
+    updated_job_id = updated.json()["analysis_queue_job"]["id"]
+    assert updated_job_id != created_job_id
+    assert unchanged.json()["analysis_queue_job"]["id"] == updated_job_id
+    assert unchanged.json()["analysis_queue_job"]["status"] == "pending"
 
     reopened = ArchiveStore(db_path)
     conversation = reopened.get_conversation(created["conversation_id"])
@@ -101,6 +117,10 @@ def test_repeated_capture_updates_in_place_then_becomes_unchanged(tmp_path):
     assert len(messages) == 3
     assert messages[1].content == "Updated locally with the same message identity."
     assert reopened.search("Append one more ordered message")[0].conversation_id == conversation.id
+    durable_queue = ContextLibraryStore(db_path)
+    assert durable_queue.get_analysis_queue_job(created_job_id).status == "superseded"
+    assert durable_queue.get_analysis_queue_job(updated_job_id).status == "pending"
+    assert len(durable_queue.list_analysis_queue_jobs()) == 2
 
 
 def test_distinct_capture_ids_do_not_merge_when_created_at_matches(tmp_path):

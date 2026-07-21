@@ -134,12 +134,19 @@ Tasks:
     overwrite, and a later explicit Use replaces the block without automatic refresh or Save. The
     existing page-lifetime reminder begins after successful Use.
 - [ ] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
-  - Next bounded slice: Persist one local analysis queue entry after a newly created or updated
-    explicit web capture, connect it to the existing source-grounded extraction pipeline, and make
-    pending and failed work restart-readable and explicitly retryable without delaying capture.
-    Verify queue schema, capture-enqueue idempotency, restart, retry, missing-key, provider failure,
-    terminal success, no-key Save, packaged database state, and cleanup before advancing to batching
-    policy, usage estimates, or onboarding changes.
+  - First bounded slice complete: Schema-v4 local queue rows are created only after an explicit web
+    capture is durably saved, remain profile-independent, reuse unchanged source-version work,
+    supersede stale unfinished versions, survive restart, and expose durable reads plus explicit
+    retry through the existing source-grounded extraction worker. Missing-key and provider failures
+    remain safely retryable; current inline or saved-profile credentials are resolved only at retry
+    time and are never stored in queue rows. Repository gates, a clean dual-executable build, and an
+    isolated packaged capture, repeat, restart, queue-route, schema, and cleanup smoke passed.
+  - Next bounded slice: Add a local scheduler that wakes after app startup or successful saved BYOK
+    profile connection, claims a bounded pending batch without concurrent source-version work,
+    records local input-usage estimates, and applies durable bounded retry backoff while preserving
+    explicit retry. Verify no-key and offline deferral without attempt consumption, startup and
+    profile-connect wakeup, bounded claims, concurrency, terminal idempotency, safe failure state,
+    local-only estimates, packaged database behavior, and cleanup before changing onboarding.
 
 ### PHASE-002 — Personalization, trust, and retrieval hardening
 

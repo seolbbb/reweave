@@ -31,9 +31,15 @@ from reweave.context_assembly import (
 )
 from reweave.context_extraction import (
     ContextExtractionResult,
+    conversation_source_fingerprint,
     extract_context_from_conversation,
 )
-from reweave.context_library import ContextItem, ContextLibraryStore, ConversationBrief
+from reweave.context_library import (
+    ContextAnalysisQueueJob,
+    ContextItem,
+    ContextLibraryStore,
+    ConversationBrief,
+)
 from reweave.conversation_capture import ConversationCapture
 from reweave.insights import generate_insight_report
 from reweave.llm import (
@@ -101,6 +107,10 @@ class ContextAnalysisRequest(BaseModel):
         "auto"
     )
     settings: LLMSettingsRequest
+
+
+class ContextAnalysisQueueRetryRequest(BaseModel):
+    settings: LLMSettingsRequest = Field(default_factory=LLMSettingsRequest)
 
 
 class CurrentChatMessageRequest(BaseModel):
@@ -285,6 +295,7 @@ def create_app(
     app = FastAPI(title="Reweave")
     store = ArchiveStore(db_path)
     context_library = ContextLibraryStore(db_path)
+    context_library.recover_interrupted_analysis_jobs()
     app.state.context_library = context_library
     archive_manager = ArchiveManager(db_path)
     app_paths = get_app_paths(data_dir)
@@ -526,6 +537,43 @@ def create_app(
             progress=100,
             result=_context_extraction_result_to_dict(result),
         )
+
+    def run_queued_context_analysis(
+        job_id: str,
+        settings: LLMSettings,
+        provider: Any,
+    ) -> None:
+        job = context_library.get_analysis_queue_job(job_id)
+        if job is None or job.status != "running":
+            return
+        try:
+            current_fingerprint = conversation_source_fingerprint(store, job.source_record_id)
+            if current_fingerprint != job.source_fingerprint:
+                context_library.supersede_analysis_queue_job(job_id)
+                return
+            result = extract_context_from_conversation(
+                store,
+                context_library,
+                conversation_id=job.source_record_id,
+                settings=settings,
+                analysis_mode=job.analysis_mode,
+                provider=provider,
+            )
+            current_job = context_library.get_analysis_queue_job(job_id)
+            if current_job is not None and current_job.status == "running":
+                context_library.complete_analysis_queue_job(
+                    job_id,
+                    brief_id=result.brief.id,
+                )
+        except Exception as exc:  # Durable jobs must always reach a terminal retryable state.
+            current_job = context_library.get_analysis_queue_job(job_id)
+            if current_job is not None and current_job.status == "running":
+                error_code, error_summary = _context_queue_error(exc)
+                context_library.fail_analysis_queue_job(
+                    job_id,
+                    error_code=error_code,
+                    error_summary=error_summary,
+                )
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -954,6 +1002,11 @@ def create_app(
             require_extension_bridge_token(x_reweave_bridge_token)
         try:
             summary = store.capture_conversation(request.to_normalized())
+            source_fingerprint = conversation_source_fingerprint(store, summary.conversation_id)
+            queue_job, _ = context_library.enqueue_analysis(
+                conversation_id=summary.conversation_id,
+                source_fingerprint=source_fingerprint,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
@@ -965,6 +1018,7 @@ def create_app(
             "inserted_messages": summary.inserted_messages,
             "updated_messages": summary.updated_messages,
             "invalidated_embeddings": summary.invalidated_embeddings,
+            "analysis_queue_job": _context_analysis_queue_job_to_dict(queue_job),
         }
 
     @app.post("/api/extension/handshake")
@@ -1273,6 +1327,55 @@ def create_app(
                 raise HTTPException(status_code=404, detail="Context analysis job not found.")
             return dict(job)
 
+    @app.get("/api/context/analysis/queue")
+    def list_context_analysis_queue(
+        status: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        try:
+            jobs = context_library.list_analysis_queue_jobs(status=status, limit=limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"results": [_context_analysis_queue_job_to_dict(job) for job in jobs]}
+
+    @app.get("/api/context/analysis/queue/{job_id}")
+    def get_context_analysis_queue_job(job_id: str) -> dict[str, Any]:
+        job = context_library.get_analysis_queue_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Context analysis queue job not found.")
+        return _context_analysis_queue_job_to_dict(job)
+
+    @app.post("/api/context/analysis/queue/{job_id}/retry", status_code=202)
+    def retry_context_analysis_queue_job(
+        job_id: str,
+        request: ContextAnalysisQueueRetryRequest,
+    ) -> dict[str, Any]:
+        job = context_library.get_analysis_queue_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Context analysis queue job not found.")
+        if job.status not in {"pending", "failed"}:
+            raise HTTPException(
+                status_code=409,
+                detail="Context analysis queue job is not retryable.",
+            )
+        try:
+            current_fingerprint = conversation_source_fingerprint(store, job.source_record_id)
+        except (LookupError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if current_fingerprint != job.source_fingerprint:
+            running_job = context_library.start_analysis_queue_job(job_id)
+            context_library.supersede_analysis_queue_job(running_job.id)
+            raise HTTPException(status_code=409, detail="A newer source version is available.")
+        try:
+            settings, provider = _resolve_llm_settings(request.settings, profile_store)
+            running_job = context_library.start_analysis_queue_job(job_id)
+        except ProviderConfigurationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        context_executor.submit(run_queued_context_analysis, running_job.id, settings, provider)
+        return _context_analysis_queue_job_to_dict(running_job)
+
     @app.get("/api/context/briefs")
     def list_context_briefs(limit: int = 100) -> dict[str, Any]:
         return {
@@ -1559,6 +1662,25 @@ def _context_brief_to_dict(brief: ConversationBrief) -> dict[str, Any]:
     }
 
 
+def _context_analysis_queue_job_to_dict(job: ContextAnalysisQueueJob) -> dict[str, Any]:
+    return {
+        "id": job.id,
+        "source_conversation_id": job.source_conversation_id,
+        "source_record_id": job.source_record_id,
+        "source_fingerprint": job.source_fingerprint,
+        "analysis_mode": job.analysis_mode,
+        "status": job.status,
+        "attempt_count": job.attempt_count,
+        "last_error_code": job.last_error_code,
+        "last_error_summary": job.last_error_summary,
+        "result_brief_id": job.result_brief_id,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+        "last_attempt_at": job.last_attempt_at,
+        "completed_at": job.completed_at,
+    }
+
+
 def _context_item_to_dict(item: ContextItem) -> dict[str, Any]:
     return {
         "id": item.id,
@@ -1825,3 +1947,21 @@ def _context_job_error(exc: Exception) -> str:
     ):
         return _insight_job_error(exc)
     return "Context analysis failed unexpectedly."
+
+
+def _context_queue_error(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, ProviderAuthenticationError):
+        return "provider_authentication", "Provider authentication failed."
+    if isinstance(exc, ProviderPermissionError):
+        return "provider_permission", "The provider denied this analysis request."
+    if isinstance(exc, ProviderRateLimitError):
+        return "provider_rate_limit", "The provider rate limit interrupted analysis."
+    if isinstance(exc, ProviderConfigurationError):
+        return "provider_configuration", "A connected provider is required for analysis."
+    if isinstance(exc, (ProviderRequestError, httpx.HTTPError)):
+        return "provider_request", "The provider request failed."
+    if isinstance(exc, LookupError):
+        return "source_unavailable", "The captured source is no longer available."
+    if isinstance(exc, ValueError):
+        return "invalid_analysis_result", "The provider returned an invalid analysis result."
+    return "analysis_failed", "Context analysis failed unexpectedly."

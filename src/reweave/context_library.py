@@ -32,6 +32,7 @@ ContextStatus = Literal["active", "superseded", "stale", "archived"]
 ScopeType = Literal["core_self", "personal", "work", "project", "topic", "destination"]
 EvidenceRelationship = Literal["supports", "contradicts", "context"]
 BriefAnalysisStatus = Literal["pending", "complete", "failed"]
+AnalysisQueueStatus = Literal["pending", "running", "failed", "complete", "superseded"]
 
 ANALYSIS_MODES = {"auto", "project", "learning", "research_writing", "context_handoff"}
 CONTEXT_ITEM_TYPES = {
@@ -52,6 +53,7 @@ CONTEXT_STATUSES = {"active", "superseded", "stale", "archived"}
 SCOPE_TYPES = {"core_self", "personal", "work", "project", "topic", "destination"}
 EVIDENCE_RELATIONSHIPS = {"supports", "contradicts", "context"}
 BRIEF_ANALYSIS_STATUSES = {"pending", "complete", "failed"}
+ANALYSIS_QUEUE_STATUSES = {"pending", "running", "failed", "complete", "superseded"}
 
 
 @dataclass(frozen=True)
@@ -167,6 +169,24 @@ class ConversationBrief:
     created_at: str
     updated_at: str
     context_item_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ContextAnalysisQueueJob:
+    id: str
+    source_conversation_id: str | None
+    source_record_id: str
+    source_fingerprint: str
+    analysis_mode: str
+    status: str
+    attempt_count: int
+    last_error_code: str | None
+    last_error_summary: str | None
+    result_brief_id: str | None
+    created_at: str
+    updated_at: str
+    last_attempt_at: str | None
+    completed_at: str | None
 
 
 class ContextLibraryStore:
@@ -361,6 +381,195 @@ class ContextLibraryStore:
                 (min(max(limit, 1), 500),),
             ).fetchall()
             return [self._row_to_brief(conn, row) for row in rows]
+
+    def enqueue_analysis(
+        self,
+        *,
+        conversation_id: str,
+        source_fingerprint: str,
+        analysis_mode: str = "auto",
+    ) -> tuple[ContextAnalysisQueueJob, bool]:
+        """Persist one pending job for a source version without duplicating unchanged work."""
+        _require_choice("analysis mode", analysis_mode, ANALYSIS_MODES)
+        fingerprint = _require_text("source fingerprint", source_fingerprint, 128)
+        now = _now()
+        job_id = uuid4().hex
+
+        with self._connect() as conn:
+            source = self._require_conversation(conn, conversation_id)
+            existing = conn.execute(
+                """
+                SELECT * FROM context_analysis_queue
+                WHERE source_record_id = ? AND source_fingerprint = ?
+                """,
+                (source["id"], fingerprint),
+            ).fetchone()
+            if existing is not None:
+                return self._row_to_analysis_queue_job(existing), False
+
+            conn.execute(
+                """
+                UPDATE context_analysis_queue
+                SET status = 'superseded', updated_at = ?, completed_at = ?
+                WHERE source_record_id = ?
+                  AND source_fingerprint <> ?
+                  AND status IN ('pending', 'running', 'failed')
+                """,
+                (now, now, source["id"], fingerprint),
+            )
+            conn.execute(
+                """
+                INSERT INTO context_analysis_queue (
+                    id, source_conversation_id, source_record_id, source_fingerprint,
+                    analysis_mode, status, attempt_count, last_error_code,
+                    last_error_summary, result_brief_id, created_at, updated_at,
+                    last_attempt_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, NULL, ?, ?, NULL, NULL)
+                """,
+                (job_id, source["id"], source["id"], fingerprint, analysis_mode, now, now),
+            )
+
+        job = self.get_analysis_queue_job(job_id)
+        if job is None:  # pragma: no cover - guarded by the transaction above.
+            raise RuntimeError("The Context analysis queue job could not be saved.")
+        return job, True
+
+    def get_analysis_queue_job(self, job_id: str) -> ContextAnalysisQueueJob | None:
+        """Return one durable Context analysis queue job."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM context_analysis_queue WHERE id = ?", (job_id,)
+            ).fetchone()
+            return self._row_to_analysis_queue_job(row) if row is not None else None
+
+    def list_analysis_queue_jobs(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[ContextAnalysisQueueJob]:
+        """Return durable queue jobs newest first, optionally filtered by status."""
+        bounded_limit = min(max(limit, 1), 500)
+        with self._connect() as conn:
+            if status is None:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM context_analysis_queue
+                    ORDER BY created_at DESC, id LIMIT ?
+                    """,
+                    (bounded_limit,),
+                ).fetchall()
+            else:
+                _require_choice("analysis queue status", status, ANALYSIS_QUEUE_STATUSES)
+                rows = conn.execute(
+                    """
+                    SELECT * FROM context_analysis_queue
+                    WHERE status = ? ORDER BY created_at DESC, id LIMIT ?
+                    """,
+                    (status, bounded_limit),
+                ).fetchall()
+            return [self._row_to_analysis_queue_job(row) for row in rows]
+
+    def start_analysis_queue_job(self, job_id: str) -> ContextAnalysisQueueJob:
+        """Move one pending or failed queue job into a new running attempt."""
+        now = _now()
+        with self._connect() as conn:
+            result = conn.execute(
+                """
+                UPDATE context_analysis_queue
+                SET status = 'running', attempt_count = attempt_count + 1,
+                    last_error_code = NULL, last_error_summary = NULL,
+                    last_attempt_at = ?, completed_at = NULL, updated_at = ?
+                WHERE id = ? AND status IN ('pending', 'failed')
+                """,
+                (now, now, job_id),
+            )
+            if result.rowcount == 0:
+                if conn.execute(
+                    "SELECT 1 FROM context_analysis_queue WHERE id = ?", (job_id,)
+                ).fetchone() is None:
+                    raise LookupError("Context analysis queue job not found.")
+                raise ValueError("Context analysis queue job is not retryable.")
+        return self._require_analysis_queue_job(job_id)
+
+    def complete_analysis_queue_job(
+        self,
+        job_id: str,
+        *,
+        brief_id: str,
+    ) -> ContextAnalysisQueueJob:
+        """Record the idempotent Brief result for a running queue job."""
+        return self._finish_analysis_queue_job(
+            job_id,
+            status="complete",
+            result_brief_id=brief_id,
+        )
+
+    def fail_analysis_queue_job(
+        self,
+        job_id: str,
+        *,
+        error_code: str,
+        error_summary: str,
+    ) -> ContextAnalysisQueueJob:
+        """Keep a provider failure durable and explicitly retryable."""
+        code = _require_text("analysis error code", error_code, 100)
+        summary = _require_text("analysis error summary", error_summary, 500)
+        return self._finish_analysis_queue_job(
+            job_id,
+            status="failed",
+            error_code=code,
+            error_summary=summary,
+        )
+
+    def supersede_analysis_queue_job(self, job_id: str) -> ContextAnalysisQueueJob:
+        """Mark a stale source-version attempt terminal without analyzing current content."""
+        return self._finish_analysis_queue_job(job_id, status="superseded")
+
+    def recover_interrupted_analysis_jobs(self) -> int:
+        """Make jobs left running by a previous app process explicitly retryable."""
+        interrupted_at = _now()
+        with self._connect() as conn:
+            result = conn.execute(
+                """
+                UPDATE context_analysis_queue
+                SET status = 'failed', last_error_code = 'interrupted',
+                    last_error_summary = 'Analysis was interrupted before completion.',
+                    updated_at = ?, completed_at = ?
+                WHERE status = 'running'
+                """,
+                (interrupted_at, interrupted_at),
+            )
+            return result.rowcount
+
+    def _finish_analysis_queue_job(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        result_brief_id: str | None = None,
+        error_code: str | None = None,
+        error_summary: str | None = None,
+    ) -> ContextAnalysisQueueJob:
+        _require_choice("analysis queue status", status, {"complete", "failed", "superseded"})
+        now = _now()
+        with self._connect() as conn:
+            result = conn.execute(
+                """
+                UPDATE context_analysis_queue
+                SET status = ?, result_brief_id = ?, last_error_code = ?,
+                    last_error_summary = ?, completed_at = ?, updated_at = ?
+                WHERE id = ? AND status = 'running'
+                """,
+                (status, result_brief_id, error_code, error_summary, now, now, job_id),
+            )
+            if result.rowcount == 0:
+                if conn.execute(
+                    "SELECT 1 FROM context_analysis_queue WHERE id = ?", (job_id,)
+                ).fetchone() is None:
+                    raise LookupError("Context analysis queue job not found.")
+                raise ValueError("Context analysis queue job is not running.")
+        return self._require_analysis_queue_job(job_id)
 
     def create_item(
         self,
@@ -681,6 +890,31 @@ class ContextLibraryStore:
             context_item_ids=item_ids,
         )
 
+    @staticmethod
+    def _row_to_analysis_queue_job(row: sqlite3.Row) -> ContextAnalysisQueueJob:
+        return ContextAnalysisQueueJob(
+            id=row["id"],
+            source_conversation_id=row["source_conversation_id"],
+            source_record_id=row["source_record_id"],
+            source_fingerprint=row["source_fingerprint"],
+            analysis_mode=row["analysis_mode"],
+            status=row["status"],
+            attempt_count=int(row["attempt_count"]),
+            last_error_code=row["last_error_code"],
+            last_error_summary=row["last_error_summary"],
+            result_brief_id=row["result_brief_id"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            last_attempt_at=row["last_attempt_at"],
+            completed_at=row["completed_at"],
+        )
+
+    def _require_analysis_queue_job(self, job_id: str) -> ContextAnalysisQueueJob:
+        job = self.get_analysis_queue_job(job_id)
+        if job is None:  # pragma: no cover - guarded by the preceding update.
+            raise RuntimeError("The Context analysis queue job disappeared while updating it.")
+        return job
+
     def _row_to_item(self, conn: sqlite3.Connection, row: sqlite3.Row) -> ContextItem:
         scopes = tuple(
             ContextScope(
@@ -937,6 +1171,30 @@ class ContextLibraryStore:
                     CHECK(source_item_id <> target_item_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS context_analysis_queue (
+                    id TEXT PRIMARY KEY,
+                    source_conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
+                    source_record_id TEXT NOT NULL,
+                    source_fingerprint TEXT NOT NULL,
+                    analysis_mode TEXT NOT NULL CHECK(
+                        analysis_mode IN (
+                            'auto', 'project', 'learning', 'research_writing', 'context_handoff'
+                        )
+                    ),
+                    status TEXT NOT NULL CHECK(
+                        status IN ('pending', 'running', 'failed', 'complete', 'superseded')
+                    ),
+                    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+                    last_error_code TEXT,
+                    last_error_summary TEXT,
+                    result_brief_id TEXT REFERENCES conversation_briefs(id) ON DELETE SET NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_attempt_at TEXT,
+                    completed_at TEXT,
+                    UNIQUE(source_record_id, source_fingerprint)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_briefs_source
                     ON conversation_briefs(source_conversation_id, updated_at);
                 CREATE INDEX IF NOT EXISTS idx_context_items_updated
@@ -945,8 +1203,12 @@ class ContextLibraryStore:
                     ON context_item_scopes(scope_type, scope_key, item_id);
                 CREATE INDEX IF NOT EXISTS idx_context_evidence_source
                     ON context_evidence(source_conversation_id, source_message_id);
+                CREATE INDEX IF NOT EXISTS idx_context_analysis_queue_status
+                    ON context_analysis_queue(status, created_at);
+                CREATE INDEX IF NOT EXISTS idx_context_analysis_queue_source
+                    ON context_analysis_queue(source_record_id, created_at);
                 INSERT OR REPLACE INTO schema_meta(key, value)
-                    VALUES ('context_schema_version', '3');
+                    VALUES ('context_schema_version', '4');
                 """
             )
             self._ensure_column(
