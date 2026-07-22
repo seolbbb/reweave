@@ -3,7 +3,7 @@
 ## Document control
 
 - Status: active
-- Last reviewed: 2026-07-21
+- Last reviewed: 2026-07-22
 - Working language: English
 
 ## Status vocabulary
@@ -81,6 +81,14 @@ Tasks:
   45 frontend tests, Ruff, JavaScript and TypeScript checks, a production frontend build, a clean
   dual-executable build, structural no-text-read regressions, and packaged Chrome/Edge reminder,
   dismissal, re-Save, unavailable-app, navigation, and cleanup evidence passed.
+  TASK-003 then completed authenticated provider-neutral Context assembly and explicit ChatGPT and
+  Claude Use through the permission-minimal Native Messaging boundary. TASK-004 now includes its
+  durable capture-enqueued queue and automatic local scheduler slices after 177 Python tests,
+  54 frontend tests, Ruff, TypeScript, a production frontend build, schema-v4-to-v5 migration,
+  bounded startup/capture/profile-connect scheduling, attempt-free no-key and offline deferral,
+  capped retry backoff, local input estimates, a clean dual-executable build, and isolated packaged
+  capture, restart, schema, foreign-key, and cleanup evidence passed. Phase exit evidence is still
+  unavailable until the intended onboarding slice completes.
 
 Tasks:
 
@@ -141,12 +149,18 @@ Tasks:
     remain safely retryable; current inline or saved-profile credentials are resolved only at retry
     time and are never stored in queue rows. Repository gates, a clean dual-executable build, and an
     isolated packaged capture, repeat, restart, queue-route, schema, and cleanup smoke passed.
-  - Next bounded slice: Add a local scheduler that wakes after app startup or successful saved BYOK
-    profile connection, claims a bounded pending batch without concurrent source-version work,
-    records local input-usage estimates, and applies durable bounded retry backoff while preserving
-    explicit retry. Verify no-key and offline deferral without attempt consumption, startup and
-    profile-connect wakeup, bounded claims, concurrency, terminal idempotency, safe failure state,
-    local-only estimates, packaged database behavior, and cleanup before changing onboarding.
+  - Second bounded slice complete: A wake-driven local scheduler starts with the app and after
+    capture or successful saved BYOK profile connection, resolves only the active connected saved
+    profile, atomically claims at most three due jobs, and serializes them through the existing
+    Context worker. Schema v5 stores capped retry times plus local-only character and conservative
+    token estimates, while no-key and offline deferral consume no attempt, transient failures use
+    60-second, five-minute, 15-minute, then one-hour capped backoff, and explicit retry remains.
+    Repository gates, a clean dual-executable build, and isolated packaged capture, restart,
+    schema-v5, foreign-key, and cleanup evidence passed.
+  - Next bounded slice: Complete TASK-004 with first-run onboarding that recommends but does not
+    require whole-export backfill, lets a no-key user continue to Context and new extension capture,
+    explains automatic queued analysis after saved provider connection, and guides Chrome or Edge
+    extension installation without representing future Context behavior as already available.
 
 ### PHASE-002 — Personalization, trust, and retrieval hardening
 

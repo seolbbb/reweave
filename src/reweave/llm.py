@@ -71,6 +71,14 @@ class ProviderRateLimitError(ProviderRequestError):
     """Raised when the provider rate limits model discovery."""
 
 
+class ProviderConnectionError(ProviderRequestError):
+    """Raised when no configured credential can reach the provider."""
+
+
+class ProviderTransientError(ProviderRequestError):
+    """Raised when the provider is temporarily unavailable."""
+
+
 @dataclass(frozen=True)
 class ModelDiscoveryResult:
     models: tuple[str, ...]
@@ -123,7 +131,7 @@ class FailoverLLMProvider:
         )
 
     def _try_keys(self, method_name: str, **kwargs):
-        failures: list[str] = []
+        failures: list[tuple[str, httpx.HTTPStatusError | httpx.RequestError]] = []
         for credential in self.credentials:
             provider = create_provider(
                 replace(self.settings, api_key=credential.api_key)
@@ -134,9 +142,8 @@ class FailoverLLMProvider:
             except (httpx.HTTPStatusError, httpx.RequestError) as exc:
                 if not _is_retryable_provider_error(exc):
                     raise ProviderRequestError(_provider_error_summary(exc)) from exc
-                failures.append(f"{credential.label}: {_provider_error_summary(exc)}")
-        failure_text = "; ".join(failures) if failures else "No keys were attempted."
-        raise ProviderConfigurationError(f"All enabled API keys failed: {failure_text}")
+                failures.append((credential.label, exc))
+        _raise_failover_error(failures)
 
 
 class OpenAICompatibleProvider:
@@ -481,6 +488,32 @@ def _provider_error_summary(exc: httpx.HTTPStatusError | httpx.RequestError) -> 
     if isinstance(exc, httpx.HTTPStatusError):
         return f"HTTP {exc.response.status_code}"
     return exc.__class__.__name__
+
+
+def _raise_failover_error(
+    failures: list[tuple[str, httpx.HTTPStatusError | httpx.RequestError]],
+) -> None:
+    failure_text = "; ".join(
+        f"{label}: {_provider_error_summary(exc)}" for label, exc in failures
+    )
+    if not failures:
+        raise ProviderConfigurationError("No enabled API keys were attempted.")
+    errors = [exc for _, exc in failures]
+    status_codes = [
+        exc.response.status_code for exc in errors if isinstance(exc, httpx.HTTPStatusError)
+    ]
+    if any(
+        isinstance(exc, httpx.RequestError) and not isinstance(exc, httpx.HTTPStatusError)
+        for exc in errors
+    ):
+        raise ProviderConnectionError(f"Could not reach the provider: {failure_text}")
+    if status_codes and all(status == 401 for status in status_codes):
+        raise ProviderAuthenticationError(f"Provider authentication failed: {failure_text}")
+    if status_codes and all(status == 403 for status in status_codes):
+        raise ProviderPermissionError(f"Provider permission failed: {failure_text}")
+    if 429 in status_codes:
+        raise ProviderRateLimitError(f"Provider rate limit reached: {failure_text}")
+    raise ProviderTransientError(f"Provider is temporarily unavailable: {failure_text}")
 
 
 def _parse_json_response(text: str) -> dict[str, Any]:

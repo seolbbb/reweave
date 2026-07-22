@@ -182,6 +182,9 @@ class ContextAnalysisQueueJob:
     attempt_count: int
     last_error_code: str | None
     last_error_summary: str | None
+    next_retry_at: str | None
+    estimated_input_characters: int | None
+    estimated_input_tokens: int | None
     result_brief_id: str | None
     created_at: str
     updated_at: str
@@ -470,6 +473,50 @@ class ContextLibraryStore:
                 ).fetchall()
             return [self._row_to_analysis_queue_job(row) for row in rows]
 
+    def claim_ready_analysis_queue_jobs(
+        self,
+        *,
+        limit: int = 3,
+        ready_at: str | None = None,
+    ) -> list[ContextAnalysisQueueJob]:
+        """Atomically claim one bounded batch of pending or due retry work."""
+        bounded_limit = min(max(limit, 1), 20)
+        timestamp = ready_at or _now()
+        job_ids: list[str] = []
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                """
+                SELECT id
+                FROM context_analysis_queue
+                WHERE (
+                    status = 'pending'
+                    AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                ) OR (
+                    status = 'failed'
+                    AND next_retry_at IS NOT NULL
+                    AND next_retry_at <= ?
+                )
+                ORDER BY created_at, id
+                LIMIT ?
+                """,
+                (timestamp, timestamp, bounded_limit),
+            ).fetchall()
+            job_ids = [row["id"] for row in rows]
+            for job_id in job_ids:
+                conn.execute(
+                    """
+                    UPDATE context_analysis_queue
+                    SET status = 'running', attempt_count = attempt_count + 1,
+                        last_error_code = NULL, last_error_summary = NULL,
+                        next_retry_at = NULL, last_attempt_at = ?, completed_at = NULL,
+                        updated_at = ?
+                    WHERE id = ? AND status IN ('pending', 'failed')
+                    """,
+                    (timestamp, timestamp, job_id),
+                )
+        return [self._require_analysis_queue_job(job_id) for job_id in job_ids]
+
     def start_analysis_queue_job(self, job_id: str) -> ContextAnalysisQueueJob:
         """Move one pending or failed queue job into a new running attempt."""
         now = _now()
@@ -479,7 +526,8 @@ class ContextLibraryStore:
                 UPDATE context_analysis_queue
                 SET status = 'running', attempt_count = attempt_count + 1,
                     last_error_code = NULL, last_error_summary = NULL,
-                    last_attempt_at = ?, completed_at = NULL, updated_at = ?
+                    next_retry_at = NULL, last_attempt_at = ?, completed_at = NULL,
+                    updated_at = ?
                 WHERE id = ? AND status IN ('pending', 'failed')
                 """,
                 (now, now, job_id),
@@ -490,6 +538,34 @@ class ContextLibraryStore:
                 ).fetchone() is None:
                     raise LookupError("Context analysis queue job not found.")
                 raise ValueError("Context analysis queue job is not retryable.")
+        return self._require_analysis_queue_job(job_id)
+
+    def record_analysis_queue_input_estimate(
+        self,
+        job_id: str,
+        *,
+        input_characters: int,
+        input_tokens: int,
+    ) -> ContextAnalysisQueueJob:
+        """Persist only local aggregate input estimates before a provider request."""
+        characters = max(0, int(input_characters))
+        tokens = max(0, int(input_tokens))
+        now = _now()
+        with self._connect() as conn:
+            result = conn.execute(
+                """
+                UPDATE context_analysis_queue
+                SET estimated_input_characters = ?, estimated_input_tokens = ?, updated_at = ?
+                WHERE id = ? AND status = 'running'
+                """,
+                (characters, tokens, now, job_id),
+            )
+            if result.rowcount == 0:
+                if conn.execute(
+                    "SELECT 1 FROM context_analysis_queue WHERE id = ?", (job_id,)
+                ).fetchone() is None:
+                    raise LookupError("Context analysis queue job not found.")
+                raise ValueError("Context analysis queue job is not running.")
         return self._require_analysis_queue_job(job_id)
 
     def complete_analysis_queue_job(
@@ -511,6 +587,7 @@ class ContextLibraryStore:
         *,
         error_code: str,
         error_summary: str,
+        next_retry_at: str | None = None,
     ) -> ContextAnalysisQueueJob:
         """Keep a provider failure durable and explicitly retryable."""
         code = _require_text("analysis error code", error_code, 100)
@@ -520,7 +597,40 @@ class ContextLibraryStore:
             status="failed",
             error_code=code,
             error_summary=summary,
+            next_retry_at=next_retry_at,
         )
+
+    def defer_analysis_queue_job(
+        self,
+        job_id: str,
+        *,
+        error_code: str,
+        error_summary: str,
+        next_retry_at: str,
+    ) -> ContextAnalysisQueueJob:
+        """Return an automatic offline attempt to pending without consuming an attempt."""
+        code = _require_text("analysis error code", error_code, 100)
+        summary = _require_text("analysis error summary", error_summary, 500)
+        retry_at = _require_text("next retry time", next_retry_at, 100)
+        now = _now()
+        with self._connect() as conn:
+            result = conn.execute(
+                """
+                UPDATE context_analysis_queue
+                SET status = 'pending', attempt_count = MAX(attempt_count - 1, 0),
+                    last_error_code = ?, last_error_summary = ?, next_retry_at = ?,
+                    completed_at = NULL, updated_at = ?
+                WHERE id = ? AND status = 'running'
+                """,
+                (code, summary, retry_at, now, job_id),
+            )
+            if result.rowcount == 0:
+                if conn.execute(
+                    "SELECT 1 FROM context_analysis_queue WHERE id = ?", (job_id,)
+                ).fetchone() is None:
+                    raise LookupError("Context analysis queue job not found.")
+                raise ValueError("Context analysis queue job is not running.")
+        return self._require_analysis_queue_job(job_id)
 
     def supersede_analysis_queue_job(self, job_id: str) -> ContextAnalysisQueueJob:
         """Mark a stale source-version attempt terminal without analyzing current content."""
@@ -535,10 +645,10 @@ class ContextLibraryStore:
                 UPDATE context_analysis_queue
                 SET status = 'failed', last_error_code = 'interrupted',
                     last_error_summary = 'Analysis was interrupted before completion.',
-                    updated_at = ?, completed_at = ?
+                    next_retry_at = ?, updated_at = ?, completed_at = ?
                 WHERE status = 'running'
                 """,
-                (interrupted_at, interrupted_at),
+                (interrupted_at, interrupted_at, interrupted_at),
             )
             return result.rowcount
 
@@ -550,6 +660,7 @@ class ContextLibraryStore:
         result_brief_id: str | None = None,
         error_code: str | None = None,
         error_summary: str | None = None,
+        next_retry_at: str | None = None,
     ) -> ContextAnalysisQueueJob:
         _require_choice("analysis queue status", status, {"complete", "failed", "superseded"})
         now = _now()
@@ -558,10 +669,19 @@ class ContextLibraryStore:
                 """
                 UPDATE context_analysis_queue
                 SET status = ?, result_brief_id = ?, last_error_code = ?,
-                    last_error_summary = ?, completed_at = ?, updated_at = ?
+                    last_error_summary = ?, next_retry_at = ?, completed_at = ?, updated_at = ?
                 WHERE id = ? AND status = 'running'
                 """,
-                (status, result_brief_id, error_code, error_summary, now, now, job_id),
+                (
+                    status,
+                    result_brief_id,
+                    error_code,
+                    error_summary,
+                    next_retry_at,
+                    now,
+                    now,
+                    job_id,
+                ),
             )
             if result.rowcount == 0:
                 if conn.execute(
@@ -902,6 +1022,17 @@ class ContextLibraryStore:
             attempt_count=int(row["attempt_count"]),
             last_error_code=row["last_error_code"],
             last_error_summary=row["last_error_summary"],
+            next_retry_at=row["next_retry_at"],
+            estimated_input_characters=(
+                int(row["estimated_input_characters"])
+                if row["estimated_input_characters"] is not None
+                else None
+            ),
+            estimated_input_tokens=(
+                int(row["estimated_input_tokens"])
+                if row["estimated_input_tokens"] is not None
+                else None
+            ),
             result_brief_id=row["result_brief_id"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
@@ -1187,6 +1318,13 @@ class ContextLibraryStore:
                     attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
                     last_error_code TEXT,
                     last_error_summary TEXT,
+                    next_retry_at TEXT,
+                    estimated_input_characters INTEGER CHECK(
+                        estimated_input_characters IS NULL OR estimated_input_characters >= 0
+                    ),
+                    estimated_input_tokens INTEGER CHECK(
+                        estimated_input_tokens IS NULL OR estimated_input_tokens >= 0
+                    ),
                     result_brief_id TEXT REFERENCES conversation_briefs(id) ON DELETE SET NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -1208,7 +1346,7 @@ class ContextLibraryStore:
                 CREATE INDEX IF NOT EXISTS idx_context_analysis_queue_source
                     ON context_analysis_queue(source_record_id, created_at);
                 INSERT OR REPLACE INTO schema_meta(key, value)
-                    VALUES ('context_schema_version', '4');
+                    VALUES ('context_schema_version', '5');
                 """
             )
             self._ensure_column(
@@ -1222,6 +1360,25 @@ class ContextLibraryStore:
                 "conversation_briefs",
                 "source_fingerprint",
                 "TEXT NOT NULL DEFAULT ''",
+            )
+            self._ensure_column(conn, "context_analysis_queue", "next_retry_at", "TEXT")
+            self._ensure_column(
+                conn,
+                "context_analysis_queue",
+                "estimated_input_characters",
+                "INTEGER",
+            )
+            self._ensure_column(
+                conn,
+                "context_analysis_queue",
+                "estimated_input_tokens",
+                "INTEGER",
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_context_analysis_queue_ready
+                ON context_analysis_queue(status, next_retry_at, created_at)
+                """
             )
 
     @staticmethod
