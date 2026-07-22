@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from hashlib import sha256
+from math import ceil
 from typing import Any
 
 from reweave.archive import ArchivedConversation, ArchivedMessage, ArchiveStore
@@ -95,6 +96,14 @@ class ContextExtractionResult:
     reused_existing: bool
     dropped_items: int
     deduplicated_items: int
+
+
+@dataclass(frozen=True)
+class ContextInputUsageEstimate:
+    """Local-only estimate for the exact extraction input prepared before a model call."""
+
+    input_characters: int
+    input_tokens: int
 
 
 def extract_context_from_conversation(
@@ -212,6 +221,37 @@ def conversation_source_fingerprint(
     if not messages:
         raise ValueError("The archived conversation has no messages to analyze.")
     return _source_fingerprint(conversation, messages)
+
+
+def estimate_context_input_usage(
+    archive_store: ArchiveStore,
+    conversation_id: str,
+    *,
+    analysis_mode: str = "auto",
+    max_context_chars: int = 80_000,
+) -> ContextInputUsageEstimate:
+    """Estimate extraction input locally without invoking or revealing content to a provider."""
+    if analysis_mode not in ANALYSIS_MODES:
+        raise ValueError(f"Unsupported analysis mode: {analysis_mode}")
+    conversation = archive_store.get_conversation(conversation_id)
+    if conversation is None:
+        raise LookupError("Archived conversation not found.")
+    messages = archive_store.get_messages(conversation_id)
+    if not messages:
+        raise ValueError("The archived conversation has no messages to analyze.")
+    system_prompt = context_extraction_system_prompt(analysis_mode)
+    source_prompt = _source_prompt(
+        conversation,
+        messages,
+        analysis_mode=analysis_mode,
+        max_context_chars=max(10_000, max_context_chars),
+    )
+    input_characters = len(system_prompt) + len(source_prompt)
+    input_bytes = len(system_prompt.encode("utf-8")) + len(source_prompt.encode("utf-8"))
+    return ContextInputUsageEstimate(
+        input_characters=input_characters,
+        input_tokens=max(1, ceil(input_bytes / 4)),
+    )
 
 
 def normalize_context_extraction(

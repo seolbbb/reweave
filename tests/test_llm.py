@@ -6,7 +6,9 @@ import reweave.llm
 from reweave.llm import (
     LLMSettings,
     ProviderConfigurationError,
+    ProviderConnectionError,
     ProviderRequestError,
+    ProviderTransientError,
     create_failover_provider,
     create_provider,
 )
@@ -80,3 +82,29 @@ def test_failover_provider_does_not_retry_non_retryable_error(monkeypatch):
         provider.generate_text(system="s", user="u", model="gpt-4o-mini")
 
     assert calls == ["Bearer first-key"]
+
+
+def test_failover_provider_distinguishes_offline_and_transient_exhaustion(monkeypatch):
+    request = reweave.llm.httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    outcomes = [
+        reweave.llm.httpx.ConnectError("offline", request=request),
+        reweave.llm.httpx.Response(503, request=request),
+    ]
+
+    for outcome, expected_error in (
+        (outcomes[0], ProviderConnectionError),
+        (outcomes[1], ProviderTransientError),
+    ):
+        def fake_post(url, *, headers, json, timeout, result=outcome):
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        monkeypatch.setattr(reweave.llm.httpx, "post", fake_post)
+        provider = create_failover_provider(
+            LLMSettings(provider="openai", model="gpt-4o-mini", api_key=""),
+            (Credential("only", "secret"),),
+        )
+
+        with pytest.raises(expected_error):
+            provider.generate_text(system="s", user="u", model="gpt-4o-mini")
