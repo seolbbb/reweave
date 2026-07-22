@@ -4,11 +4,11 @@
 
 - Last verified: 2026-07-22
 - Working language: English
-- Current phase: PHASE-001
-- State: active
-- Repository state: TASK-001, TASK-002, and TASK-003 are complete. TASK-004 now includes durable
-  capture-to-analysis queue and automatic local scheduler slices, while intended onboarding
-  remains open. Re-observe Git on every resume.
+- Current phase: PHASE-002
+- State: blocked
+- Repository state: TASK-001 through TASK-004 are complete and PHASE-001 exit verification is
+  available. PHASE-002 implementation must not begin until its real-archive entry evidence exists.
+  Re-observe Git on every resume.
 - Current implementation identity: Local archive and search application with a primary
   Context Home and Explorer, onboarding, archive management, optional hybrid search, cited
   Ask Archive, Insight Reports, and a Phase 0 Memory Audit pilot.
@@ -138,20 +138,61 @@ Current code and historical verification show:
   port, current chat, draft, or full Context Item records.
 - Development registration scripts create and remove the exact per-user Chrome and Edge Native
   Messaging registry entries and restrict the host manifest to explicit extension origins.
+- First-run onboarding now presents whole-export backfill as the recommended faster route without
+  making it mandatory. A user may skip directly to the empty Context surface and new extension
+  capture, while the existing ZIP, JSON, and local-path Import screen remains available.
+- The onboarding and Settings copy explain that capture, browsing, and search work without an API
+  key, pending Context analysis starts automatically after a successful saved BYOK connection, and
+  the current development extension requires an unpacked Chrome or Edge load plus Native Messaging
+  registration rather than claiming automatic installation.
+- Onboarding completion keeps the existing durable local-storage key so existing users do not see
+  the wizard again. Step transitions move keyboard focus to the new heading; desktop and 375-pixel
+  layouts provide internal scrolling, 44-pixel core actions, and no horizontal overflow.
 
 The preceding list describes current software, not completion of the Context Library product contract.
 
 ## In progress
 
-- TASK-000, TASK-001, TASK-002, and TASK-003 are integrated and verified.
-- PHASE-001 remains active because the intended optional-backfill onboarding is not implemented.
+- TASK-000 through TASK-004 are integrated and verified through the required repository delivery
+  loop.
+- PHASE-001 exit criteria are complete after the optional-backfill onboarding passed automated,
+  responsive-browser, clean executable-build, and packaged restart verification.
 - The five TASK-002 slices complete the provider-neutral local capture contract, secure
   Chrome/Edge Native Messaging scaffold, explicit ChatGPT and Claude whole-conversation Save,
   and non-blocking page-lifetime unsaved reminders.
-- TASK-004 is in progress. Its durable queue and automatic local scheduler slices are implemented
-  and verified; onboarding remains.
+- TASK-004 is complete across durable queue, automatic local scheduler, and optional-backfill
+  first-run onboarding slices.
+- PHASE-002 is blocked at its documented entry gate because the product owner's default local
+  archive currently has no real conversations or Context baseline evidence.
 
 ## Verification evidence
+
+### Fresh in the TASK-004 optional-backfill onboarding slice
+
+- Ruff passed across the repository; all 177 Python tests passed; all 57 frontend tests passed;
+  production extension JavaScript syntax, TypeScript, the Vite production build, and final diff
+  checks passed.
+- First-run regressions cover visibly recommended but optional export backfill, direct no-import
+  continuation, no-key behavior, automatic queued analysis after saved provider connection,
+  current Chrome/Edge extension guidance, the preserved Import and Settings destinations, durable
+  completion, existing-user behavior, and fail-closed onboarding when archive counts are unknown.
+- Browser flows at 1280 by 720 and 375 by 812 pixels passed recommended-backfill, direct skip,
+  no-key Context, Settings, and existing Import paths with no console warnings or errors and no
+  horizontal overflow. The corrected mobile dialog uses an internal vertical scroll area, step
+  headings receive focus after navigation, and the extension setup link plus core actions meet the
+  44-pixel target.
+- A fresh clean PyInstaller build created `dist/Reweave/Reweave.exe` (17,405,681 bytes) and
+  `dist/Reweave/ReweaveNativeHost.exe` (2,234,930 bytes).
+- The isolated packaged app returned healthy HTTP, served the new hashed frontend bundle and its
+  optional-backfill, automatic-queue, and current-extension copy, exposed an empty no-key Context
+  library with no connected provider, and returned healthy HTTP with the same bundle after a full
+  process restart. Its database reported `context_schema_version=5`, zero conversations, messages,
+  Briefs, and Context Items, and zero foreign-key violations. Both packaged processes stopped and
+  all isolated browser and package data was removed.
+- A read-only check of the product owner's default local database found schema version 2, zero
+  conversations and messages, and no Context schema yet. No conversation content was read. This is
+  current evidence for the PHASE-002 entry blocker, not an implementation failure in TASK-004.
+- Strict Full document validation passed with zero errors and warnings.
 
 ### Fresh in the TASK-004 automatic scheduler slice
 
@@ -489,9 +530,9 @@ These are historical merge records and were not rerun by the current documentati
 - The accepted product removes user-facing Ask Archive, but current code still implements and exposes it.
 - Conversation Brief and Context Item persistence, one-conversation extraction, durable
   capture-enqueued work, automatic bounded scheduling, retry backoff, local usage estimates,
-  explicit retry, backend analysis/read APIs, Context Home, Explorer, and source-evidence
-  navigation now exist. Full Core Self behavior, automatic routing, Knowledge Graph, correction
-  learning, and exception Review do not yet exist.
+  explicit retry, optional-backfill onboarding, backend analysis/read APIs, Context Home, Explorer,
+  and source-evidence navigation now exist. Full Core Self behavior, automatic routing, Knowledge
+  Graph, correction learning, and exception Review do not yet exist.
 - The local whole-conversation capture contract, secure Chrome/Edge extension bridge, ChatGPT and
   Claude DOM adapters, explicit Save and Use paths, page-lifetime unsaved reminders, authenticated
   Context assembly, and on-request draft insertion and refresh now exist. Destination correction,
@@ -505,28 +546,31 @@ These are historical merge records and were not rerun by the current documentati
 
 ## Blockers
 
-- None for TASK-004.
+- PHASE-002 entry is blocked because the product owner's default local archive contains zero
+  conversations and has no real Context Brief, Context Item, retrieval, prompt, correction, or API
+  usage baseline. A future task may inspect privacy-safe counts and outcomes only; raw content must
+  remain local unless the user explicitly expands scope.
 - The public v1 scope freeze and encrypted-synchronization timing are intentionally deferred to PHASE-004 and do not block the current phase.
 
 ## Next task
 
-- TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and
-  onboarding that recommends but does not require export backfill.
-- Current bounded slice: Complete TASK-004 by replacing the export-dependent first-run wizard with
-  onboarding that recommends whole-export backfill for faster initial value but lets the user skip
-  directly to new extension capture. Explain that capture, browse, and search work without an API
-  key; queued analysis starts automatically after a saved provider connection; and Chrome or Edge
-  extension installation enables everyday Save and Use.
-- Acceptance: Export backfill is visibly recommended and remains optional; skipping import does
-  not route the user back into a required Import step; a no-key user can reach the empty Context
-  and extension-capture path; provider connection communicates the automatic queued-analysis
-  behavior without exposing credentials; the existing import path remains available; onboarding
-  completion remains durable and keyboard accessible at desktop and 375-pixel widths; and no
-  future Context behavior is represented as already available.
-- Verify: Add first-run tests for recommended import, skip-without-import, no-key explanation,
-  provider connection, extension guidance, durable completion, and existing-user non-regression;
-  run desktop and 375-pixel browser flows, all repository and strict document gates, a fresh clean
-  Windows executable build, and an isolated packaged first-run smoke with complete cleanup.
+- TASK-005: Implement linked spaces, Core Self, inferred values and tacit knowledge, automatic
+  routing, and visible provenance.
+- Current bounded entry gate: Before TASK-005 implementation, use the product owner's real local
+  archive to prove the PHASE-002 entry criteria. Import or explicitly capture at least one supported
+  real conversation, connect a saved provider, let its queued analysis produce a Conversation Brief
+  and any source-supported Context Items, then complete one explicit Use Reweave round-trip.
+- Acceptance: The default local database is upgraded without losing source data; at least one real
+  source remains browseable and searchable; one durable Brief exists after automatic queued
+  analysis; zero Context Items is accepted when the source supports none; explicit Use either
+  inserts bounded source-linked Context or reports unavailable Context accurately; and baseline
+  retrieval misses, corrections, provider usage, and latency are recorded only as privacy-safe
+  counts or outcomes without copying raw conversation or Context content into the repository.
+- Verify: Re-observe the default database and saved-profile connection without exposing secrets,
+  run one product-owner Save or Import through automatic analysis and restart, run one Use flow in a
+  supported private ChatGPT or Claude conversation, record privacy-safe baseline evidence, and then
+  re-evaluate whether PHASE-002 can become active before starting the first TASK-005 implementation
+  slice.
 
 ## Resume checklist
 
