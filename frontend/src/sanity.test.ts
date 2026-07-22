@@ -22,7 +22,12 @@ import { HighlightedText, extractHighlightTerms } from "./textHighlight";
 import { OnboardingWizard } from "./ArchiveManagement";
 import { MemoryAuditView } from "./MemoryAudit";
 import { isAuditItemReviewed, manualClaimsFromText } from "./memoryAuditHelpers";
-import { Workspace } from "./Workspace";
+import {
+  ONBOARDING_STORAGE_KEY,
+  rememberOnboardingComplete,
+  shouldOpenOnboarding,
+  Workspace
+} from "./Workspace";
 import {
   buildContextScopeGroups,
   contextBriefEntries,
@@ -383,19 +388,39 @@ describe("frontend state helpers", () => {
     expect(html).toContain('aria-label="Open source message 3 in Reweave planning"');
   });
 
-  it("renders a first-run wizard with local privacy and export guidance", () => {
+  it("renders a first-run wizard with optional backfill and explicit capture guidance", () => {
     const html = renderToStaticMarkup(
       createElement(OnboardingWizard, {
         open: true,
         busy: false,
         onImport: async () => null,
-        onFinish: () => undefined,
-        onDismiss: () => undefined
+        onFinish: () => undefined
       })
     );
 
-    expect(html).toContain("Bring your AI conversations home");
+    expect(html).toContain("Start a Context Library on your terms");
     expect(html).toContain("Local by default");
-    expect(html).toContain("Back up, restore, or permanently delete your data");
+    expect(html).toContain("Optional history");
+    expect(html).toContain("without an API key");
+    expect(html).toContain("Start without import");
+  });
+
+  it("keeps first-run completion durable without reopening for existing users", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      }
+    };
+
+    expect(shouldOpenOnboarding(0, storage)).toBe(true);
+    expect(shouldOpenOnboarding(null, storage)).toBe(false);
+    expect(shouldOpenOnboarding(4, storage)).toBe(false);
+
+    rememberOnboardingComplete(storage);
+
+    expect(values.get(ONBOARDING_STORAGE_KEY)).toBe("true");
+    expect(shouldOpenOnboarding(0, storage)).toBe(false);
   });
 });

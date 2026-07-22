@@ -497,6 +497,54 @@
   line-height: 1.45;
 }
 
+.onboardingRecommendation,
+.onboardingInlineAction {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin-top: 10px;
+  border: 1px solid #d7e0e8;
+  border-radius: 9px;
+  padding: 17px;
+  background: #f6f9fc;
+  color: #1a5a94;
+}
+
+.onboardingRecommendation {
+  grid-template-columns: 28px minmax(0, 1fr);
+}
+
+.onboardingRecommendation span,
+.onboardingInlineAction span {
+  display: grid;
+  gap: 4px;
+}
+
+.onboardingRecommendation b,
+.onboardingInlineAction b {
+  color: #21303f;
+  font-size: 12px;
+}
+
+.onboardingRecommendation small,
+.onboardingInlineAction small {
+  color: #758293;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.onboardingInlineAction {
+  width: 100%;
+  background: #fff;
+  text-align: left;
+}
+
+.onboardingInlineAction:hover {
+  border-color: #8eb1d2;
+  background: #f5f9fc;
+}
+
 .providerTabs {
   display: inline-grid;
   grid-template-columns: 1fr 1fr;
@@ -603,6 +651,65 @@
   text-align: center;
 }
 
+.onboardingSkipLink {
+  justify-self: start;
+}
+
+.onboardingStartGrid {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.onboardingStartGrid article {
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr);
+  gap: 11px;
+  align-items: start;
+  border: 1px solid #dce3ea;
+  border-radius: 8px;
+  padding: 13px 15px;
+  background: #fafbfc;
+  color: #1b5b96;
+}
+
+.onboardingStartGrid article > span {
+  display: grid;
+  gap: 3px;
+}
+
+.onboardingStartGrid b {
+  color: #21303f;
+  font-size: 11px;
+}
+
+.onboardingStartGrid small {
+  color: #758293;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.onboardingStartGrid code {
+  border-radius: 3px;
+  padding: 1px 4px;
+  background: #edf2f6;
+  color: #30475b;
+  font-size: 0.95em;
+}
+
+.onboardingStartGrid a {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  justify-self: start;
+  margin-top: 4px;
+  min-height: 44px;
+  padding: 8px 0;
+  color: #1b5b96;
+  font-size: 10px;
+  font-weight: 700;
+}
+
 .onboardingDestinations {
   display: grid;
   gap: 9px;
@@ -625,6 +732,11 @@
 .onboardingDestinations button:hover {
   border-color: #8eb1d2;
   background: #f5f9fc;
+}
+
+.onboardingDestinations button.primaryDestination {
+  border-color: #2d6fa8;
+  background: #edf5fb;
 }
 
 .onboardingDestinations span {
@@ -723,9 +835,15 @@
 
   .onboardingDialog {
     display: block;
+    height: 100vh;
     min-height: 100vh;
     max-height: 100vh;
     border-radius: 0;
+  }
+
+  .onboardingContent {
+    height: 100vh;
+    overflow-y: auto;
   }
 
   .onboardingRail {
@@ -738,5 +856,19 @@
 
   .onboardingPromises {
     grid-template-columns: 1fr;
+  }
+
+  .onboardingStartGrid article,
+  .onboardingRecommendation,
+  .onboardingInlineAction {
+    padding: 14px;
+  }
+
+  .onboardingActions {
+    gap: 8px;
+  }
+
+  .onboardingActions .primaryButton {
+    min-height: 44px;
   }
 }

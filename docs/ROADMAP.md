@@ -16,8 +16,8 @@
 
 ## Current phase
 
-- Phase: PHASE-001
-- Outcome: Deliver the first end-to-end stored-conversation-to-web-chat Context loop on the accepted canonical contract.
+- Phase: PHASE-002
+- Outcome: Clear the real-archive entry gate, then harden personalization, trust, and retrieval.
 
 ## Phases
 
@@ -40,7 +40,7 @@ Tasks:
 
 ### PHASE-001 — First end-to-end Context loop
 
-- Status: active
+- Status: done
 - Outcome: One stored conversation can become a durable Conversation Brief and linked Context Items, appear in Context Home and Explorer, retain source evidence, and participate in an explicit Save and Use web-chat loop.
 - Dependencies: PHASE-000.
 - Entry criteria: PHASE-000 is done and current implementation has been re-observed against the accepted product contract.
@@ -82,13 +82,12 @@ Tasks:
   dual-executable build, structural no-text-read regressions, and packaged Chrome/Edge reminder,
   dismissal, re-Save, unavailable-app, navigation, and cleanup evidence passed.
   TASK-003 then completed authenticated provider-neutral Context assembly and explicit ChatGPT and
-  Claude Use through the permission-minimal Native Messaging boundary. TASK-004 now includes its
-  durable capture-enqueued queue and automatic local scheduler slices after 177 Python tests,
-  54 frontend tests, Ruff, TypeScript, a production frontend build, schema-v4-to-v5 migration,
-  bounded startup/capture/profile-connect scheduling, attempt-free no-key and offline deferral,
-  capped retry backoff, local input estimates, a clean dual-executable build, and isolated packaged
-  capture, restart, schema, foreign-key, and cleanup evidence passed. Phase exit evidence is still
-  unavailable until the intended onboarding slice completes.
+  Claude Use through the permission-minimal Native Messaging boundary. TASK-004 completed its
+  durable capture-enqueued queue, automatic local scheduler, and optional-backfill onboarding
+  slices. The final onboarding slice passed 177 Python tests, 57 frontend tests, Ruff, extension
+  syntax, TypeScript, a production frontend build, desktop and 375-pixel first-run browser flows,
+  a clean dual-executable build, and an isolated packaged no-key first run plus full restart with
+  schema v5 and zero foreign-key violations. PHASE-001 exit evidence is complete.
 
 Tasks:
 
@@ -141,7 +140,7 @@ Tasks:
     One bounded identifiable block is inserted before the preserved draft, concurrent edits prevent
     overwrite, and a later explicit Use replaces the block without automatic refresh or Save. The
     existing page-lifetime reminder begins after successful Use.
-- [ ] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
+- [x] TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and onboarding that recommends but does not require export backfill.
   - First bounded slice complete: Schema-v4 local queue rows are created only after an explicit web
     capture is durably saved, remain profile-independent, reuse unchanged source-version work,
     supersede stale unfinished versions, survive restart, and expose durable reads plus explicit
@@ -157,14 +156,16 @@ Tasks:
     60-second, five-minute, 15-minute, then one-hour capped backoff, and explicit retry remains.
     Repository gates, a clean dual-executable build, and isolated packaged capture, restart,
     schema-v5, foreign-key, and cleanup evidence passed.
-  - Next bounded slice: Complete TASK-004 with first-run onboarding that recommends but does not
-    require whole-export backfill, lets a no-key user continue to Context and new extension capture,
-    explains automatic queued analysis after saved provider connection, and guides Chrome or Edge
-    extension installation without representing future Context behavior as already available.
+  - Third bounded slice complete: First-run onboarding visibly recommends but does not require
+    whole-export backfill, lets a no-key user continue to Context and current extension capture,
+    explains automatic queued analysis after saved provider connection, preserves existing Import
+    and Settings destinations, and accurately labels the current unpacked Chrome/Edge installation
+    path. Durable completion, keyboard focus, 44-pixel actions, desktop and 375-pixel layouts,
+    repository gates, a clean dual-executable build, and isolated packaged restart evidence passed.
 
 ### PHASE-002 — Personalization, trust, and retrieval hardening
 
-- Status: planned
+- Status: blocked
 - Outcome: Reweave can maintain a useful model of the user with little routine management while preventing scope leakage, confident mispersonalization, and retrieval blind spots.
 - Dependencies: PHASE-001.
 - Entry criteria: PHASE-001 works with the product owner's real archive and baseline quality evidence exists.
@@ -180,11 +181,18 @@ Tasks:
   - Prompt versions pass extraction, grounding, useful-synthesis, prompt-injection, and scope-leakage regression tests.
   - Review contains exceptions only.
   - Encrypted local backup and complete restore pass.
-- Verification evidence: Not available until the phase is done.
+- Verification evidence: Entry is blocked. A read-only 2026-07-22 check found the product owner's
+  default local archive at schema version 2 with zero conversations and messages and no Context
+  schema, so the required real-archive and baseline-quality evidence does not exist yet. No raw
+  conversation content was read.
 
 Tasks:
 
 - [ ] TASK-005: Implement linked spaces, Core Self, inferred values and tacit knowledge, automatic routing, and visible provenance.
+  - Entry gate before implementation: Use at least one real product-owner conversation to verify
+    durable source capture or import, saved-provider automatic analysis, restart persistence, one
+    explicit Use round-trip, and privacy-safe baseline outcomes required by PHASE-002. Do not copy
+    raw source or Context content into repository evidence.
 - [ ] TASK-006: Implement correction precedence, version history, stale confidence, contradiction handling, merge review, and undo.
 - [ ] TASK-007: Implement destination trust, scope isolation, sensitive-use confirmation, risky-export warning, and exception Review.
 - [ ] TASK-008: Implement progressive global retrieval, graph expansion, full-library fallback, and the prompt/retrieval golden evaluation set.

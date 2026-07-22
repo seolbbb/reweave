@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArchiveRestore,
   ArrowLeft,
@@ -11,8 +11,10 @@ import {
   FileUp,
   FolderOpen,
   HardDrive,
+  KeyRound,
   Loader2,
   MessageSquareText,
+  Puzzle,
   Search,
   ShieldCheck,
   Trash2
@@ -355,21 +357,20 @@ type OnboardingWizardProps = {
   open: boolean;
   busy: boolean;
   onImport: (files: FileList | File[]) => Promise<ImportResult | null>;
-  onFinish: (destination: "library" | "search") => void;
-  onDismiss: () => void;
+  onFinish: (destination: "context" | "import" | "settings") => void;
 };
 
 export function OnboardingWizard({
   open,
   busy,
   onImport,
-  onFinish,
-  onDismiss
+  onFinish
 }: OnboardingWizardProps) {
   const [step, setStep] = useState(0);
   const [provider, setProvider] = useState<"chatgpt" | "claude">("chatgpt");
   const [summary, setSummary] = useState<ImportResult | null>(null);
   const [message, setMessage] = useState("Choose the export ZIP or JSON file when it is ready.");
+  const titleRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -378,6 +379,10 @@ export function OnboardingWizard({
     setSummary(null);
     setMessage("Choose the export ZIP or JSON file when it is ready.");
   }, [open]);
+
+  useEffect(() => {
+    if (open) titleRef.current?.focus();
+  }, [open, step]);
 
   if (!open) return null;
 
@@ -389,8 +394,10 @@ export function OnboardingWizard({
       return;
     }
     setSummary(result);
-    setStep(3);
+    setStep(4);
   }
+
+  const steps = ["Welcome", "Backfill", "Export", "Import", "Start"];
 
   return (
     <div className="onboardingBackdrop" role="presentation">
@@ -398,13 +405,17 @@ export function OnboardingWizard({
         <aside className="onboardingRail">
           <span className="onboardingLogo">R</span>
           <div>
-            {["Welcome", "Export", "Import", "Ready"].map((label, index) => (
-              <span className={index === step ? "active" : index < step ? "complete" : ""} key={label}>
+            {steps.map((label, index) => (
+              <span
+                className={index === step ? "active" : index < step ? "complete" : ""}
+                aria-current={index === step ? "step" : undefined}
+                key={label}
+              >
                 <i>{index < step ? "✓" : index + 1}</i>{label}
               </span>
             ))}
           </div>
-          <small>Your archive stays yours.</small>
+          <small>Import is recommended, never required.</small>
         </aside>
 
         <div className="onboardingContent">
@@ -412,20 +423,46 @@ export function OnboardingWizard({
             <div className="onboardingStep">
               <span className="onboardingIcon"><HardDrive size={26} /></span>
               <span className="sectionLabel">Welcome to Reweave</span>
-              <h1 id="onboarding-title">Bring your AI conversations home.</h1>
-              <p>Reweave turns ChatGPT and Claude exports into a private, searchable library on this computer.</p>
+              <h1 id="onboarding-title" ref={titleRef} tabIndex={-1}>Start a Context Library on your terms.</h1>
+              <p>
+                Reweave keeps conversations you explicitly save or import on this computer. A historical
+                export builds useful context faster, but you can begin with new conversations instead.
+              </p>
               <div className="onboardingPromises">
-                <span><ShieldCheck size={18} /><b>Local by default</b><small>Browsing and search do not upload your archive.</small></span>
-                <span><Search size={18} /><b>Useful immediately</b><small>Browse every imported conversation without a search term.</small></span>
-                <span><DatabaseBackup size={18} /><b>Under your control</b><small>Back up, restore, or permanently delete your data.</small></span>
+                <span><ShieldCheck size={18} /><b>Local by default</b><small>Capture, browsing, and search stay available without an API key.</small></span>
+                <span><DatabaseBackup size={18} /><b>Optional history</b><small>Import ChatGPT or Claude exports when a faster backfill is useful.</small></span>
+                <span><Puzzle size={18} /><b>Explicit browser actions</b><small>The extension reads a chat only after you choose Save or Use.</small></span>
               </div>
             </div>
           )}
 
           {step === 1 && (
             <div className="onboardingStep">
-              <span className="sectionLabel">Step 1 · Request your export</span>
-              <h1 id="onboarding-title">Export from your AI service</h1>
+              <span className="sectionLabel">Recommended, not required</span>
+              <h1 id="onboarding-title" ref={titleRef} tabIndex={-1}>Bring history forward for faster initial value.</h1>
+              <p>
+                A whole export gives Reweave more prior conversations to browse and search immediately.
+                Skip it if you would rather build the library from new, explicitly saved chats.
+              </p>
+              <div className="onboardingRecommendation">
+                <FileUp size={22} />
+                <span>
+                  <b>Recommended: import an export</b>
+                  <small>Request or import a ChatGPT or Claude ZIP/JSON file. You can return to Import later.</small>
+                </span>
+              </div>
+              <button className="onboardingInlineAction" type="button" onClick={() => setStep(4)}>
+                <Puzzle size={18} />
+                <span><b>Start with new conversations</b><small>Continue to the extension setup without importing.</small></span>
+                <ArrowRight size={17} />
+              </button>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="onboardingStep">
+              <span className="sectionLabel">Optional backfill · Request your export</span>
+              <h1 id="onboarding-title" ref={titleRef} tabIndex={-1}>Export from your AI service</h1>
               <div className="providerTabs" role="tablist" aria-label="Export service">
                 <button className={provider === "chatgpt" ? "active" : ""} type="button" role="tab" aria-selected={provider === "chatgpt"} onClick={() => setProvider("chatgpt")}>ChatGPT</button>
                 <button className={provider === "claude" ? "active" : ""} type="button" role="tab" aria-selected={provider === "claude"} onClick={() => setProvider("claude")}>Claude</button>
@@ -443,13 +480,16 @@ export function OnboardingWizard({
                   href="https://support.anthropic.com/en/articles/9450526-how-can-i-export-my-claude-data"
                 />
               )}
+              <button className="textButton onboardingSkipLink" type="button" onClick={() => setStep(4)}>
+                Continue without waiting for an export <ArrowRight size={15} />
+              </button>
             </div>
           )}
 
-          {step === 2 && (
+          {step === 3 && (
             <div className="onboardingStep">
-              <span className="sectionLabel">Step 2 · Build your local archive</span>
-              <h1 id="onboarding-title">Import the downloaded file</h1>
+              <span className="sectionLabel">Optional backfill · Import locally</span>
+              <h1 id="onboarding-title" ref={titleRef} tabIndex={-1}>Import the downloaded file</h1>
               <p>You can use the full ZIP as downloaded. Reweave extracts supported conversation JSON temporarily and removes the temporary files after import.</p>
               <label className={`onboardingDrop ${busy ? "busy" : ""}`}>
                 {busy ? <Loader2 className="spin" size={30} /> : <FileUp size={30} />}
@@ -470,32 +510,72 @@ export function OnboardingWizard({
             </div>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <div className="onboardingStep onboardingComplete">
               <span className="onboardingIcon success"><CheckCircle2 size={28} /></span>
-              <span className="sectionLabel">Your archive is ready</span>
-              <h1 id="onboarding-title">Start with the conversations you already have.</h1>
-              <p>
-                Imported {(summary?.inserted_conversations ?? 0).toLocaleString()} new conversations and {(summary?.inserted_messages ?? 0).toLocaleString()} messages.
-              </p>
+              <span className="sectionLabel">Ready for everyday capture</span>
+              <h1 id="onboarding-title" ref={titleRef} tabIndex={-1}>
+                {summary ? "Your history is imported. Add new conversations as you go." : "Start with new conversations—no export or API key required."}
+              </h1>
+              {summary ? (
+                <p>
+                  Imported {summary.inserted_conversations.toLocaleString()} new conversations and {summary.inserted_messages.toLocaleString()} messages.
+                </p>
+              ) : (
+                <p>Open Context now, then add history later or capture a supported web chat with the extension.</p>
+              )}
+              <div className="onboardingStartGrid">
+                <article>
+                  <Search size={19} />
+                  <span><b>Use local features now</b><small>Explicit saves persist locally. Context, Library, and Search remain available without a key while analysis waits.</small></span>
+                </article>
+                <article>
+                  <KeyRound size={19} />
+                  <span><b>Connect analysis when ready</b><small>Settings stores the key in the operating-system credential store. A successful saved connection starts queued Context analysis automatically.</small></span>
+                </article>
+                <article>
+                  <Puzzle size={19} />
+                  <span>
+                    <b>Add the current Chrome or Edge extension</b>
+                    <small>
+                      This development build does not install it automatically. Load the repository&apos;s <code>extension</code> folder unpacked, then register the included Native Messaging host as described in the setup guide.
+                    </small>
+                    <a href="https://github.com/seolbbb/reweave/tree/main/extension" target="_blank" rel="noreferrer">
+                      Open current extension setup <ExternalLink size={14} />
+                    </a>
+                  </span>
+                </article>
+              </div>
               <div className="onboardingDestinations">
-                <button type="button" onClick={() => onFinish("library")}>
-                  <FolderOpen size={20} /><span><b>Browse the library</b><small>See recent conversations by service and date.</small></span><ArrowRight size={17} />
+                <button className="primaryDestination" type="button" onClick={() => onFinish("context")}>
+                  <HardDrive size={20} /><span><b>Open Context</b><small>Continue to the empty or newly built Context Library.</small></span><ArrowRight size={17} />
                 </button>
-                <button type="button" onClick={() => onFinish("search")}>
-                  <Search size={20} /><span><b>Search the archive</b><small>Find a remembered phrase, idea, or decision.</small></span><ArrowRight size={17} />
+                <button type="button" onClick={() => onFinish("settings")}>
+                  <KeyRound size={20} /><span><b>Connect an AI provider</b><small>Save a BYOK connection and start pending analysis automatically.</small></span><ArrowRight size={17} />
+                </button>
+                <button type="button" onClick={() => onFinish("import")}>
+                  <FolderOpen size={20} /><span><b>Import history later</b><small>The existing ZIP, JSON, and local-path import screen remains available.</small></span><ArrowRight size={17} />
                 </button>
               </div>
             </div>
           )}
 
-          {step < 3 && (
+          {step < 4 && (
             <footer className="onboardingActions">
-              <button className="textButton" type="button" onClick={step === 0 ? onDismiss : () => setStep((value) => value - 1)}>
-                {step === 0 ? "Skip for now" : <><ArrowLeft size={15} /> Back</>}
+              <button
+                className="textButton"
+                type="button"
+                onClick={step === 0 ? () => setStep(4) : () => setStep((value) => Math.max(0, value - 1))}
+              >
+                {step === 0 ? "Start without import" : <><ArrowLeft size={15} /> Back</>}
               </button>
-              <button className="primaryButton" type="button" onClick={() => setStep((value) => value + 1)} disabled={busy || step === 2}>
-                {step === 0 ? "Get started" : step === 1 ? "I have requested it" : "Import a file above"} <ArrowRight size={15} />
+              <button
+                className="primaryButton"
+                type="button"
+                onClick={() => setStep((value) => Math.min(4, value + 1))}
+                disabled={busy || step === 3}
+              >
+                {step === 0 ? "See recommended backfill" : step === 1 ? "View export steps" : step === 2 ? "I have the export file" : "Choose a file above"} <ArrowRight size={15} />
               </button>
             </footer>
           )}
