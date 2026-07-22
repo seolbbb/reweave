@@ -1374,6 +1374,42 @@ svg {
   line-height: 1.45;
 }
 
+.onboardingRecommendation,
+.onboardingInlineAction,
+.onboardingStartGrid article {
+  border-color: var(--color-border);
+  border-radius: 9px;
+}
+
+.onboardingRecommendation,
+.onboardingStartGrid article {
+  background: var(--color-surface-subtle);
+}
+
+.onboardingInlineAction {
+  background: var(--color-surface);
+}
+
+.onboardingRecommendation b,
+.onboardingInlineAction b,
+.onboardingStartGrid b {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.onboardingRecommendation small,
+.onboardingInlineAction small,
+.onboardingStartGrid small,
+.onboardingStartGrid a {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.onboardingStartGrid a {
+  color: var(--color-accent);
+}
+
 .providerTabs {
   border-color: var(--color-border);
   border-radius: 9px;
@@ -1429,6 +1465,11 @@ svg {
 
 .onboardingDestinations button:hover {
   border-color: #9aafbd;
+  background: var(--color-accent-subtle);
+}
+
+.onboardingDestinations button.primaryDestination {
+  border-color: #86a9bf;
   background: var(--color-accent-subtle);
 }
 
