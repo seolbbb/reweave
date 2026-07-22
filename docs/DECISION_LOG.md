@@ -298,7 +298,10 @@ The following entries record the current accepted product direction.
 - Implementation evidence: Automatic queue work resolves only the active connected saved BYOK
   profile at claim time. Queue rows retain no profile ID, credential, or copied source content;
   no-key work remains local and pending until a successful saved-profile connection wakes the
-  scheduler.
+  scheduler. First-run onboarding recommends optional whole-export backfill, lets a no-key user
+  continue to Context and current extension capture, explains automatic pending analysis after a
+  saved connection, preserves the existing completion key for prior users, and identifies the
+  current unpacked extension setup without claiming automatic installation.
 - Reconsider when: BYOK prevents ordinary use, provider policies block the workflow, or a managed service can preserve the same privacy and open-source contract sustainably.
 - Supersedes: None
 - Superseded by: None

@@ -336,7 +336,7 @@ export function Workspace() {
       loadReports(),
       loadSemanticStatus()
     ]);
-    if (conversationCount === 0 && !hasCompletedOnboarding()) setOnboardingOpen(true);
+    if (shouldOpenOnboarding(conversationCount)) setOnboardingOpen(true);
   }
 
   async function loadSemanticStatus() {
@@ -865,16 +865,10 @@ export function Workspace() {
     await Promise.all([loadFacets(), loadReports(), loadSemanticStatus()]);
   }
 
-  function finishOnboarding(destination: "library" | "search") {
+  function finishOnboarding(destination: "context" | "import" | "settings") {
     rememberOnboardingComplete();
     setOnboardingOpen(false);
     setActiveView(destination);
-  }
-
-  function dismissOnboarding() {
-    rememberOnboardingComplete();
-    setOnboardingOpen(false);
-    setActiveView("import");
   }
 
   return (
@@ -1071,7 +1065,6 @@ export function Workspace() {
         busy={busy}
         onImport={importFiles}
         onFinish={finishOnboarding}
-        onDismiss={dismissOnboarding}
       />
     </main>
   );
@@ -1814,11 +1807,11 @@ function SettingsView(props: SettingsProps) {
       <header className="pageHeader">
         <span className="sectionLabel">Bring your own model</span>
         <h1>AI connection</h1>
-        <p>Local search stays on this device. Connect a provider only for Ask Archive or insight reports.</p>
+        <p>Capture, browsing, and search stay available without a provider. Connect one when you want queued Context analysis and existing AI reports.</p>
       </header>
       <div className="settingsLayout">
         <section className="settingsSection">
-          <header><div><h2>Provider connection</h2><p>API keys stay in your operating system keyring.</p></div>{connected && <span className="connectedBadge"><Check size={13} /> Connected</span>}</header>
+          <header><div><h2>Provider connection</h2><p>API keys stay in your operating-system credential store. A successful saved connection starts pending Context analysis automatically.</p></div>{connected && <span className="connectedBadge"><Check size={13} /> Connected</span>}</header>
           <label>Provider<select value={props.activeProfileId} onChange={(event) => props.changeProfile(event.target.value)}>{props.profiles.map((profile) => <option value={profile.id} key={profile.id}>{providerDetails[profile.provider]?.label ?? profile.name}</option>)}</select></label>
           {connected && !props.editingKey ? (
             <div className="connectedKey">
@@ -1844,7 +1837,7 @@ function SettingsView(props: SettingsProps) {
           </div>
         </section>
         <section className="settingsSection">
-          <header><div><h2>Insight model</h2><p>Choose the model used for source-grounded reports.</p></div><button className="iconButton" type="button" onClick={props.reloadModels} aria-label="Refresh models"><RefreshCw size={17} /></button></header>
+          <header><div><h2>Context analysis model</h2><p>Choose the model used for source-grounded Context analysis and existing reports.</p></div><button className="iconButton" type="button" onClick={props.reloadModels} aria-label="Refresh models"><RefreshCw size={17} /></button></header>
           <label>Available model<select value={props.model} onChange={(event) => props.saveModel(event.target.value)} disabled={!props.modelLoad.models.length}><option value="">Choose a model</option>{props.modelLoad.models.map((item) => <option value={item} key={item}>{item}</option>)}</select></label>
           <div className="twoColumnFields">
             <label>Context characters<input type="number" min={1000} value={props.maxContextChars} onChange={(event) => props.setMaxContextChars(Number(event.target.value))} /></label>
@@ -1979,17 +1972,25 @@ function chooseModel(current: string, saved: string, models: string[], provider:
   return models.find((item) => item.toLocaleLowerCase().includes(preference)) ?? models[0] ?? "";
 }
 
-function hasCompletedOnboarding() {
+type OnboardingStorage = Pick<Storage, "getItem" | "setItem">;
+
+export const ONBOARDING_STORAGE_KEY = "reweave:onboarding-complete:v1";
+
+export function hasCompletedOnboarding(storage?: OnboardingStorage) {
   try {
-    return window.localStorage.getItem("reweave:onboarding-complete:v1") === "true";
+    return (storage ?? window.localStorage).getItem(ONBOARDING_STORAGE_KEY) === "true";
   } catch {
     return false;
   }
 }
 
-function rememberOnboardingComplete() {
+export function shouldOpenOnboarding(conversationCount: number | null, storage?: OnboardingStorage) {
+  return conversationCount === 0 && !hasCompletedOnboarding(storage);
+}
+
+export function rememberOnboardingComplete(storage?: OnboardingStorage) {
   try {
-    window.localStorage.setItem("reweave:onboarding-complete:v1", "true");
+    (storage ?? window.localStorage).setItem(ONBOARDING_STORAGE_KEY, "true");
   } catch {
     // Onboarding still works when storage is unavailable in a restricted webview.
   }
