@@ -2,7 +2,7 @@
 
 ## Document control
 
-- Last reviewed: 2026-07-21
+- Last reviewed: 2026-07-22
 - Working language: English
 - Historical mapping: DEC-001 through DEC-010 preserve the former D-001 through D-010 records from PRODUCT_STRATEGY_AND_ROADMAP.md.
 
@@ -261,6 +261,10 @@ The following entries record the current accepted product direction.
 - Options considered: One universal prompt, fully user-authored prompts, product prompts with additive personal instructions, immediate per-save calls, or scheduled/batched calls.
 - Decision: Provide Auto plus Project, Learning, Research/Writing, and Context Handoff modes; label observed, inferred, and suggested output; run local parsing, search, routing, and duplicate detection first; batch remote synthesis; expose prompt versions; protect safety rules from user override.
 - Consequences: Every selected conversation receives a brief, but item types are not filled artificially. Failures remain queued and retry. Prompt changes require a source, usefulness, hallucination, injection, and scope-leakage golden set.
+- Implementation evidence: The schema-v5 local scheduler atomically claims at most three ready
+  source versions, serializes them through one Context worker, computes aggregate input estimates
+  from the exact prepared prompt before remote analysis, returns offline work to pending without
+  consuming an attempt, and applies durable capped backoff only to transient provider failures.
 - Reconsider when: Local preprocessing harms quality, one model call cannot produce reliable structure, or provider capabilities materially change the cost/quality boundary.
 - Supersedes: None
 - Superseded by: None
@@ -291,6 +295,10 @@ The following entries record the current accepted product direction.
 - Options considered: Managed LLM, BYOK only, local model only, required cloud account, or local library with optional future services.
 - Decision: Ship Windows, Chrome, and Edge first; support ChatGPT and Claude first; keep the library local; use BYOK; keep the local app and extension MIT; require no account for the core product.
 - Consequences: Onboarding must discover models, recommend defaults, test connection, and secure credentials. Optional paid encrypted synchronization may be considered later. English is the first UI language.
+- Implementation evidence: Automatic queue work resolves only the active connected saved BYOK
+  profile at claim time. Queue rows retain no profile ID, credential, or copied source content;
+  no-key work remains local and pending until a successful saved-profile connection wakes the
+  scheduler.
 - Reconsider when: BYOK prevents ordinary use, provider policies block the workflow, or a managed service can preserve the same privacy and open-source contract sustainably.
 - Supersedes: None
 - Superseded by: None

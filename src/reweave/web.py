@@ -6,7 +6,8 @@ import json
 import secrets
 import shutil
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Lock
 from typing import Any, Literal
@@ -32,6 +33,7 @@ from reweave.context_assembly import (
 from reweave.context_extraction import (
     ContextExtractionResult,
     conversation_source_fingerprint,
+    estimate_context_input_usage,
     extract_context_from_conversation,
 )
 from reweave.context_library import (
@@ -40,15 +42,18 @@ from reweave.context_library import (
     ContextLibraryStore,
     ConversationBrief,
 )
+from reweave.context_scheduler import ContextAnalysisScheduler, SchedulerRuntime
 from reweave.conversation_capture import ConversationCapture
 from reweave.insights import generate_insight_report
 from reweave.llm import (
     LLMSettings,
     ProviderAuthenticationError,
     ProviderConfigurationError,
+    ProviderConnectionError,
     ProviderPermissionError,
     ProviderRateLimitError,
     ProviderRequestError,
+    ProviderTransientError,
     create_failover_provider,
     discover_available_models,
 )
@@ -292,7 +297,20 @@ def create_app(
     extension_bridge_token: str | None = None,
 ) -> FastAPI:
     """Create the FastAPI app."""
-    app = FastAPI(title="Reweave")
+    scheduler_holder: dict[str, ContextAnalysisScheduler] = {}
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        scheduler = scheduler_holder.get("scheduler")
+        if scheduler is not None:
+            scheduler.start()
+        try:
+            yield
+        finally:
+            if scheduler is not None:
+                scheduler.stop()
+
+    app = FastAPI(title="Reweave", lifespan=lifespan)
     store = ArchiveStore(db_path)
     context_library = ContextLibraryStore(db_path)
     context_library.recover_interrupted_analysis_jobs()
@@ -542,11 +560,24 @@ def create_app(
         job_id: str,
         settings: LLMSettings,
         provider: Any,
+        *,
+        automatic: bool = False,
     ) -> None:
         job = context_library.get_analysis_queue_job(job_id)
         if job is None or job.status != "running":
             return
         try:
+            estimate = estimate_context_input_usage(
+                store,
+                job.source_record_id,
+                analysis_mode=job.analysis_mode,
+                max_context_chars=settings.max_context_chars,
+            )
+            context_library.record_analysis_queue_input_estimate(
+                job_id,
+                input_characters=estimate.input_characters,
+                input_tokens=estimate.input_tokens,
+            )
             current_fingerprint = conversation_source_fingerprint(store, job.source_record_id)
             if current_fingerprint != job.source_fingerprint:
                 context_library.supersede_analysis_queue_job(job_id)
@@ -569,11 +600,60 @@ def create_app(
             current_job = context_library.get_analysis_queue_job(job_id)
             if current_job is not None and current_job.status == "running":
                 error_code, error_summary = _context_queue_error(exc)
-                context_library.fail_analysis_queue_job(
-                    job_id,
-                    error_code=error_code,
-                    error_summary=error_summary,
-                )
+                if automatic and _is_offline_context_error(exc):
+                    context_library.defer_analysis_queue_job(
+                        job_id,
+                        error_code=error_code,
+                        error_summary=error_summary,
+                        next_retry_at=_context_queue_offline_retry_at(),
+                    )
+                else:
+                    next_retry_at = (
+                        _context_queue_retry_at(current_job.attempt_count)
+                        if automatic and _is_transient_context_error(exc)
+                        else None
+                    )
+                    context_library.fail_analysis_queue_job(
+                        job_id,
+                        error_code=error_code,
+                        error_summary=error_summary,
+                        next_retry_at=next_retry_at,
+                    )
+
+    def resolve_scheduler_runtime() -> SchedulerRuntime | None:
+        stored_profiles = profile_store.list()
+        if not stored_profiles.active_profile_id:
+            return None
+        profile = profile_store.get(stored_profiles.active_profile_id)
+        if profile is None or not profile.default_model:
+            return None
+        credentials = profile_store.credentials_for(profile.id)
+        if not credentials:
+            return None
+        settings = LLMSettings(
+            provider=profile.provider,
+            model=profile.default_model,
+            api_key="",
+            base_url=profile.base_url,
+        )
+        return SchedulerRuntime(
+            settings=settings,
+            provider=create_failover_provider(settings, credentials),
+        )
+
+    context_scheduler = ContextAnalysisScheduler(
+        context_library,
+        resolve_runtime=resolve_scheduler_runtime,
+        submit_job=lambda job_id, settings, provider: context_executor.submit(
+            run_queued_context_analysis,
+            job_id,
+            settings,
+            provider,
+            automatic=True,
+        ),
+    )
+    scheduler_holder["scheduler"] = context_scheduler
+    app.state.context_analysis_scheduler = context_scheduler
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -1009,6 +1089,7 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        context_scheduler.wake()
         return {
             "conversation_id": summary.conversation_id,
             "provider": request.provider,
@@ -1204,6 +1285,7 @@ def create_app(
         )
         profile_store.set_active(profile_id)
         connected_profile = profile_store.get(profile_id) or updated_profile
+        context_scheduler.wake()
         return {
             "profile": _llm_profile_to_dict(connected_profile, profile_store),
             "models": models,
@@ -1373,7 +1455,13 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        context_executor.submit(run_queued_context_analysis, running_job.id, settings, provider)
+        context_executor.submit(
+            run_queued_context_analysis,
+            running_job.id,
+            settings,
+            provider,
+            automatic=False,
+        )
         return _context_analysis_queue_job_to_dict(running_job)
 
     @app.get("/api/context/briefs")
@@ -1673,6 +1761,9 @@ def _context_analysis_queue_job_to_dict(job: ContextAnalysisQueueJob) -> dict[st
         "attempt_count": job.attempt_count,
         "last_error_code": job.last_error_code,
         "last_error_summary": job.last_error_summary,
+        "next_retry_at": job.next_retry_at,
+        "estimated_input_characters": job.estimated_input_characters,
+        "estimated_input_tokens": job.estimated_input_tokens,
         "result_brief_id": job.result_brief_id,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
@@ -1956,6 +2047,17 @@ def _context_queue_error(exc: Exception) -> tuple[str, str]:
         return "provider_permission", "The provider denied this analysis request."
     if isinstance(exc, ProviderRateLimitError):
         return "provider_rate_limit", "The provider rate limit interrupted analysis."
+    if isinstance(exc, ProviderConnectionError):
+        return "offline", "The provider could not be reached; analysis remains pending."
+    if isinstance(exc, ProviderTransientError):
+        return "provider_unavailable", "The provider is temporarily unavailable."
+    if isinstance(exc, httpx.RequestError) and not isinstance(exc, httpx.HTTPStatusError):
+        return "offline", "The provider could not be reached; analysis remains pending."
+    if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code == 429:
+            return "provider_rate_limit", "The provider rate limit interrupted analysis."
+        if exc.response.status_code >= 500:
+            return "provider_unavailable", "The provider is temporarily unavailable."
     if isinstance(exc, ProviderConfigurationError):
         return "provider_configuration", "A connected provider is required for analysis."
     if isinstance(exc, (ProviderRequestError, httpx.HTTPError)):
@@ -1965,3 +2067,27 @@ def _context_queue_error(exc: Exception) -> tuple[str, str]:
     if isinstance(exc, ValueError):
         return "invalid_analysis_result", "The provider returned an invalid analysis result."
     return "analysis_failed", "Context analysis failed unexpectedly."
+
+
+def _is_offline_context_error(exc: Exception) -> bool:
+    return isinstance(exc, ProviderConnectionError) or (
+        isinstance(exc, httpx.RequestError) and not isinstance(exc, httpx.HTTPStatusError)
+    )
+
+
+def _is_transient_context_error(exc: Exception) -> bool:
+    if isinstance(exc, (ProviderRateLimitError, ProviderTransientError)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code == 429 or exc.response.status_code >= 500
+    return False
+
+
+def _context_queue_offline_retry_at() -> str:
+    return (datetime.now(tz=UTC) + timedelta(seconds=30)).isoformat()
+
+
+def _context_queue_retry_at(attempt_count: int) -> str:
+    backoff_seconds = (60, 300, 900, 3_600)
+    index = min(max(attempt_count, 1) - 1, len(backoff_seconds) - 1)
+    return (datetime.now(tz=UTC) + timedelta(seconds=backoff_seconds[index])).isoformat()

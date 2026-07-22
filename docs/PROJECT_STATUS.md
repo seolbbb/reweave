@@ -6,9 +6,9 @@
 - Working language: English
 - Current phase: PHASE-001
 - State: active
-- Repository state: TASK-001, TASK-002, and TASK-003 are complete. TASK-004 now includes its first
-  durable capture-to-analysis queue slice, while automatic batch scheduling and usage estimates
-  remain open. Re-observe Git on every resume.
+- Repository state: TASK-001, TASK-002, and TASK-003 are complete. TASK-004 now includes durable
+  capture-to-analysis queue and automatic local scheduler slices, while intended onboarding
+  remains open. Re-observe Git on every resume.
 - Current implementation identity: Local archive and search application with a primary
   Context Home and Explorer, onboarding, archive management, optional hybrid search, cited
   Ask Archive, Insight Reports, and a Phase 0 Memory Audit pilot.
@@ -53,13 +53,23 @@ Current code and historical verification show:
 - A non-blocking backend Context analysis job API that resolves inline or saved-profile BYOK
   settings, serializes model calls, reports terminal success or failure, and reuses unchanged
   completed analysis.
-- A schema-v4 durable Context analysis queue records one profile-independent pending job for each
+- A schema-v5 durable Context analysis queue records one profile-independent pending job for each
   explicit web-capture source version after local capture completes. Unchanged Save repeats reuse
   the same job, while a newer source version supersedes older pending, running, or failed work.
 - Durable queue reads survive app restart. Explicit retry resolves the current inline or saved BYOK
   profile only at attempt time, serializes through the existing extraction worker, records safe
   terminal state and attempt metadata without credentials or copied source content, reuses the
   idempotent Brief and Context Item path, and recovers interrupted app-process work as retryable.
+- A wake-driven local scheduler starts with the app and after successful capture or saved BYOK
+  profile connection. It resolves only the active connected saved profile, atomically claims at
+  most three ready jobs, and serializes them through the existing single Context worker so one
+  source version cannot run concurrently or again after completion.
+- The scheduler leaves no-key work pending without an attempt, returns offline work to pending
+  without consuming an attempt, and gives transient provider failures durable 60-second,
+  five-minute, 15-minute, then one-hour capped retry times while preserving explicit retry.
+  Schema-v5 queue rows expose local-only character and conservative UTF-8 token estimates computed
+  from the exact prepared extraction input before the provider call; they store neither source
+  content, credentials, nor a profile identifier.
 - Durable Context Brief and Item list/detail APIs that expose analysis metadata, scopes,
   versions, links, compact evidence snapshots, and whether the live source still exists.
 - Context is the default application surface, with Home rendering recent Conversation Briefs,
@@ -134,15 +144,35 @@ The preceding list describes current software, not completion of the Context Lib
 ## In progress
 
 - TASK-000, TASK-001, TASK-002, and TASK-003 are integrated and verified.
-- PHASE-001 remains active because automatic bounded batch scheduling, retry backoff, usage
-  estimates, and the intended backfill recommendation are not implemented.
+- PHASE-001 remains active because the intended optional-backfill onboarding is not implemented.
 - The five TASK-002 slices complete the provider-neutral local capture contract, secure
   Chrome/Edge Native Messaging scaffold, explicit ChatGPT and Claude whole-conversation Save,
   and non-blocking page-lifetime unsaved reminders.
-- TASK-004 is in progress. Its first bounded durable analysis-queue slice is implemented and
-  verified; automatic scheduling, usage estimates, and onboarding remain.
+- TASK-004 is in progress. Its durable queue and automatic local scheduler slices are implemented
+  and verified; onboarding remains.
 
 ## Verification evidence
+
+### Fresh in the TASK-004 automatic scheduler slice
+
+- Ruff passed across the repository; all 177 Python tests passed with one pre-existing
+  Starlette/httpx deprecation warning. Deterministic coverage includes schema-v4-to-v5 migration,
+  bounded atomic claims, source-version concurrency, startup, capture, and profile-connect wakeup,
+  no-key and offline attempt-free deferral, local estimates before provider invocation, safe
+  transient failure state, capped retry scheduling, explicit retry, terminal idempotency, and
+  provider failover error classification.
+- All 54 frontend tests passed; TypeScript and the Vite production build passed and reproduced the
+  packaged web assets. `git diff --check` passed with line-ending notices only.
+- A fresh clean PyInstaller build created `dist/Reweave/Reweave.exe` (17,405,681 bytes) and
+  `dist/Reweave/ReweaveNativeHost.exe` (2,234,930 bytes).
+- The isolated packaged app returned healthy HTTP, accepted one authenticated no-key capture as
+  created, and kept its queue job pending with zero attempts and no estimate because no saved BYOK
+  profile was connected. After a forced process stop and full packaged restart, the same job ID,
+  pending state, and zero-attempt count remained readable.
+- The isolated packaged database reported `context_schema_version=5`, one pending zero-attempt
+  queue row with no scheduled retry or usage estimate, and zero foreign-key violations. Both
+  packaged processes stopped and the isolated database, descriptor, profile, model, import, and
+  extraction paths were removed.
 
 ### Fresh in the TASK-004 durable analysis-queue slice
 
@@ -458,10 +488,10 @@ These are historical merge records and were not rerun by the current documentati
 - The accepted Product Spec replaces the historical AI Memory Control Plane and manual Memory Audit direction, but current code still exposes Memory Audit as a standalone surface.
 - The accepted product removes user-facing Ask Archive, but current code still implements and exposes it.
 - Conversation Brief and Context Item persistence, one-conversation extraction, durable
-  capture-enqueued work, explicit retry, backend analysis/read APIs, Context Home, Explorer, and
-  source-evidence navigation now exist. Automatic batch scheduling, retry backoff, usage
-  estimates, full Core Self behavior, automatic routing, Knowledge Graph, correction learning,
-  and exception Review do not yet exist.
+  capture-enqueued work, automatic bounded scheduling, retry backoff, local usage estimates,
+  explicit retry, backend analysis/read APIs, Context Home, Explorer, and source-evidence
+  navigation now exist. Full Core Self behavior, automatic routing, Knowledge Graph, correction
+  learning, and exception Review do not yet exist.
 - The local whole-conversation capture contract, secure Chrome/Edge extension bridge, ChatGPT and
   Claude DOM adapters, explicit Save and Use paths, page-lifetime unsaved reminders, authenticated
   Context assembly, and on-request draft insertion and refresh now exist. Destination correction,
@@ -482,21 +512,21 @@ These are historical merge records and were not rerun by the current documentati
 
 - TASK-004: Add durable automatic batching, retry, BYOK queue behavior, usage estimates, and
   onboarding that recommends but does not require export backfill.
-- Current bounded slice: Add the local scheduler that claims durable pending work only when a
-  connected saved BYOK profile is available, starts after app startup or profile connection,
-  processes a bounded batch through the existing single-worker extraction path, applies durable
-  retry backoff, and exposes a local input-usage estimate before remote analysis.
-- Acceptance: Capture and no-key use remain immediate and local; no-key or offline work remains
-  pending without consuming an attempt; app startup and successful profile connection wake the
-  scheduler without requiring Analyze now; no source version runs concurrently or more than once
-  after completion; transient provider failures retain safe error state and a bounded next-retry
-  time; explicit retry remains available; estimates are computed locally without sending content;
-  credentials and source content are absent from queue rows; and export backfill remains optional.
-- Verify: Add deterministic scheduler, startup/profile-connect wakeup, bounded-claim, concurrency,
-  no-key, offline, retry-backoff, explicit-retry, terminal-idempotency, and local-estimate tests;
-  verify queue/API behavior against an isolated packaged database; run all repository and strict
-  document gates; create a fresh clean Windows executable and packaged smoke; and remove all
-  temporary processes and data.
+- Current bounded slice: Complete TASK-004 by replacing the export-dependent first-run wizard with
+  onboarding that recommends whole-export backfill for faster initial value but lets the user skip
+  directly to new extension capture. Explain that capture, browse, and search work without an API
+  key; queued analysis starts automatically after a saved provider connection; and Chrome or Edge
+  extension installation enables everyday Save and Use.
+- Acceptance: Export backfill is visibly recommended and remains optional; skipping import does
+  not route the user back into a required Import step; a no-key user can reach the empty Context
+  and extension-capture path; provider connection communicates the automatic queued-analysis
+  behavior without exposing credentials; the existing import path remains available; onboarding
+  completion remains durable and keyboard accessible at desktop and 375-pixel widths; and no
+  future Context behavior is represented as already available.
+- Verify: Add first-run tests for recommended import, skip-without-import, no-key explanation,
+  provider connection, extension guidance, durable completion, and existing-user non-regression;
+  run desktop and 375-pixel browser flows, all repository and strict document gates, a fresh clean
+  Windows executable build, and an isolated packaged first-run smoke with complete cleanup.
 
 ## Resume checklist
 

@@ -15,7 +15,7 @@ from reweave.context_extraction import (
     conversation_source_fingerprint,
 )
 from reweave.context_library import ContextLibraryStore
-from reweave.llm import ProviderRequestError
+from reweave.llm import ModelDiscoveryResult, ProviderRateLimitError, ProviderRequestError
 from reweave.web import create_app
 
 
@@ -52,6 +52,17 @@ def _wait_for_queue_job(client: TestClient, job_id: str) -> dict:
             return job
         sleep(0.01)
     pytest.fail("Durable Context analysis queue job did not reach a terminal state.")
+
+
+def _wait_for_queue_condition(client: TestClient, job_id: str, predicate) -> dict:
+    for _ in range(100):
+        response = client.get(f"/api/context/analysis/queue/{job_id}")
+        assert response.status_code == 200
+        job = response.json()
+        if predicate(job):
+            return job
+        sleep(0.01)
+    pytest.fail("Durable Context analysis queue job did not reach the expected state.")
 
 
 def _seed_archive(db_path, fixtures_dir):
@@ -101,6 +112,57 @@ def _provider_response():
             }
         ],
     }
+
+
+def _fake_keyring(monkeypatch):
+    secrets = {}
+    monkeypatch.setattr(
+        reweave.llm_profiles.keyring,
+        "set_password",
+        lambda service, name, value: secrets.__setitem__((service, name), value),
+    )
+    monkeypatch.setattr(
+        reweave.llm_profiles.keyring,
+        "get_password",
+        lambda service, name: secrets.get((service, name)),
+    )
+    monkeypatch.setattr(
+        reweave.llm_profiles.keyring,
+        "delete_password",
+        lambda service, name: secrets.pop((service, name), None),
+    )
+    return secrets
+
+
+def _save_fake_extraction(
+    archive_store,
+    context_store,
+    *,
+    conversation_id,
+    settings,
+    analysis_mode,
+    provider,
+):
+    brief = context_store.save_brief(
+        conversation_id=conversation_id,
+        main_subject="Scheduled Context analysis",
+        user_goal="Process durable work through the saved provider profile.",
+        analysis_mode=analysis_mode,
+        analysis_version=f"{CONTEXT_EXTRACTION_PROMPT_VERSION}:{analysis_mode}",
+        prompt_version=CONTEXT_EXTRACTION_PROMPT_VERSION,
+        analysis_provider=settings.provider,
+        analysis_model=settings.model,
+        source_fingerprint=conversation_source_fingerprint(archive_store, conversation_id),
+    )
+    return ContextExtractionResult(
+        brief=brief,
+        items=(),
+        analysis_version=brief.analysis_version,
+        prompt_version=brief.prompt_version,
+        reused_existing=False,
+        dropped_items=0,
+        deduplicated_items=0,
+    )
 
 
 def _analysis_request(conversation_id: str, **settings):
@@ -451,3 +513,197 @@ def test_durable_queue_retry_uses_current_saved_profile_without_persisting_secre
     assert captured["provider"].credentials[0].api_key == "queue-profile-secret"
     assert "queue-profile-secret" not in str(completed)
     assert b"queue-profile-secret" not in db_path.read_bytes()
+
+
+def test_scheduler_processes_pending_work_on_startup_with_local_estimates(
+    monkeypatch, tmp_path, fixtures_dir
+):
+    _fake_keyring(monkeypatch)
+    db_path = tmp_path / "archive.db"
+    data_dir = tmp_path / "app-data"
+    _, queued = _seed_analysis_queue(db_path, fixtures_dir, analysis_mode="auto")
+    bootstrap = TestClient(create_app(db_path, data_dir=data_dir))
+    profile = next(
+        item
+        for item in bootstrap.get("/api/llm/profiles").json()["profiles"]
+        if item["provider"] == "openai"
+    )
+    bootstrap.post(
+        f"/api/llm/profiles/{profile['id']}/keys",
+        json={"label": "Primary", "api_key": "startup-secret", "priority": 0},
+    )
+    bootstrap.post("/api/llm/profiles/active", json={"profile_id": profile["id"]})
+    observed = {}
+
+    def scheduled_extract(
+        archive_store,
+        context_store,
+        *,
+        conversation_id,
+        settings,
+        analysis_mode,
+        provider,
+    ):
+        running = context_store.list_analysis_queue_jobs(status="running")[0]
+        observed["characters"] = running.estimated_input_characters
+        observed["tokens"] = running.estimated_input_tokens
+        return _save_fake_extraction(
+            archive_store,
+            context_store,
+            conversation_id=conversation_id,
+            settings=settings,
+            analysis_mode=analysis_mode,
+            provider=provider,
+        )
+
+    monkeypatch.setattr(reweave.web, "extract_context_from_conversation", scheduled_extract)
+    app = create_app(db_path, data_dir=data_dir)
+    with TestClient(app) as client:
+        completed = _wait_for_queue_job(client, queued.id)
+
+    assert completed["status"] == "complete"
+    assert completed["attempt_count"] == 1
+    assert completed["next_retry_at"] is None
+    assert observed["characters"] == completed["estimated_input_characters"]
+    assert observed["tokens"] == completed["estimated_input_tokens"]
+    assert observed["characters"] > 0
+    assert observed["tokens"] > 0
+    assert b"startup-secret" not in db_path.read_bytes()
+
+
+def test_scheduler_defers_without_key_then_wakes_after_profile_connection(
+    monkeypatch, tmp_path, fixtures_dir
+):
+    _fake_keyring(monkeypatch)
+    db_path = tmp_path / "archive.db"
+    data_dir = tmp_path / "app-data"
+    _, queued = _seed_analysis_queue(db_path, fixtures_dir)
+    monkeypatch.setattr(reweave.web, "extract_context_from_conversation", _save_fake_extraction)
+    monkeypatch.setattr(
+        reweave.web,
+        "discover_available_models",
+        lambda settings, credentials: ModelDiscoveryResult(
+            models=("gpt-scheduled",),
+            credential_label=credentials[0].label,
+        ),
+    )
+    app = create_app(db_path, data_dir=data_dir)
+
+    with TestClient(app) as client:
+        pending = client.get(f"/api/context/analysis/queue/{queued.id}").json()
+        assert pending["status"] == "pending"
+        assert pending["attempt_count"] == 0
+        profile = next(
+            item
+            for item in client.get("/api/llm/profiles").json()["profiles"]
+            if item["provider"] == "openai"
+        )
+        response = client.post(
+            f"/api/llm/profiles/{profile['id']}/connect",
+            json={"api_key": "connected-secret"},
+        )
+        completed = _wait_for_queue_job(client, queued.id)
+
+    assert response.status_code == 200
+    assert completed["status"] == "complete"
+    assert completed["attempt_count"] == 1
+
+
+def test_automatic_scheduler_offline_deferral_does_not_consume_an_attempt(
+    monkeypatch, tmp_path, fixtures_dir
+):
+    _fake_keyring(monkeypatch)
+    db_path = tmp_path / "archive.db"
+    data_dir = tmp_path / "app-data"
+    _, queued = _seed_analysis_queue(db_path, fixtures_dir)
+    bootstrap = TestClient(create_app(db_path, data_dir=data_dir))
+    profile = bootstrap.get("/api/llm/profiles").json()["profiles"][0]
+    bootstrap.post(
+        f"/api/llm/profiles/{profile['id']}/keys",
+        json={"label": "Primary", "api_key": "offline-secret", "priority": 0},
+    )
+    bootstrap.post("/api/llm/profiles/active", json={"profile_id": profile["id"]})
+
+    def offline_extract(*args, **kwargs):
+        request = reweave.web.httpx.Request("POST", "https://provider.invalid")
+        raise reweave.web.httpx.ConnectError("offline detail", request=request)
+
+    monkeypatch.setattr(reweave.web, "extract_context_from_conversation", offline_extract)
+    app = create_app(db_path, data_dir=data_dir)
+    with TestClient(app) as client:
+        deferred = _wait_for_queue_condition(
+            client,
+            queued.id,
+            lambda job: job["status"] == "pending" and job["last_error_code"] == "offline",
+        )
+
+    assert deferred["attempt_count"] == 0
+    assert deferred["last_error_summary"] == (
+        "The provider could not be reached; analysis remains pending."
+    )
+    assert deferred["next_retry_at"] is not None
+    assert deferred["estimated_input_characters"] > 0
+    assert "offline detail" not in str(deferred)
+
+
+def test_automatic_scheduler_applies_bounded_backoff_and_retries_due_work(
+    monkeypatch, tmp_path, fixtures_dir
+):
+    _fake_keyring(monkeypatch)
+    db_path = tmp_path / "archive.db"
+    data_dir = tmp_path / "app-data"
+    _, queued = _seed_analysis_queue(db_path, fixtures_dir)
+    app = create_app(db_path, data_dir=data_dir)
+    client = TestClient(app)
+    profile = client.get("/api/llm/profiles").json()["profiles"][0]
+    client.post(
+        f"/api/llm/profiles/{profile['id']}/keys",
+        json={"label": "Primary", "api_key": "retry-secret", "priority": 0},
+    )
+    client.post("/api/llm/profiles/active", json={"profile_id": profile["id"]})
+    attempts = []
+
+    def scheduled_extract(
+        archive_store,
+        context_store,
+        *,
+        conversation_id,
+        settings,
+        analysis_mode,
+        provider,
+    ):
+        attempts.append(conversation_id)
+        if len(attempts) == 1:
+            raise ProviderRateLimitError("secret provider detail")
+        return _save_fake_extraction(
+            archive_store,
+            context_store,
+            conversation_id=conversation_id,
+            settings=settings,
+            analysis_mode=analysis_mode,
+            provider=provider,
+        )
+
+    monkeypatch.setattr(reweave.web, "extract_context_from_conversation", scheduled_extract)
+    monkeypatch.setattr(
+        reweave.web,
+        "_context_queue_retry_at",
+        lambda attempt_count: "2000-01-01T00:00:00+00:00",
+    )
+
+    first_run = app.state.context_analysis_scheduler.run_once()
+    failed = client.get(f"/api/context/analysis/queue/{queued.id}").json()
+    second_run = app.state.context_analysis_scheduler.run_once()
+    completed = client.get(f"/api/context/analysis/queue/{queued.id}").json()
+
+    assert first_run.claimed_job_ids == (queued.id,)
+    assert failed["status"] == "failed"
+    assert failed["attempt_count"] == 1
+    assert failed["last_error_code"] == "provider_rate_limit"
+    assert failed["last_error_summary"] == "The provider rate limit interrupted analysis."
+    assert failed["next_retry_at"] == "2000-01-01T00:00:00+00:00"
+    assert "secret provider detail" not in str(failed)
+    assert second_run.claimed_job_ids == (queued.id,)
+    assert completed["status"] == "complete"
+    assert completed["attempt_count"] == 2
+    assert completed["next_retry_at"] is None
