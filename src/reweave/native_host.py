@@ -184,9 +184,7 @@ def forward_conversation_capture(
         return _capture_result("incompatible", "malformed_response")
     outcome = payload.get("outcome")
     message_count = payload.get("message_count")
-    if outcome not in {"created", "updated", "unchanged"} or not isinstance(
-        message_count, int
-    ):
+    if outcome not in {"created", "updated", "unchanged"} or not isinstance(message_count, int):
         return _capture_result("incompatible", "malformed_response")
     return _capture_result(
         "saved",
@@ -202,7 +200,7 @@ def forward_context_assembly(
     runtime_path: Path | None = None,
     urlopen: Callable[..., Any] = urllib.request.urlopen,
 ) -> dict[str, Any]:
-    """Forward one bounded private-use request and return insertion-only Context."""
+    """Forward a bounded explicit Use or local review action without retaining chat text."""
     if not isinstance(context_request, dict):
         return _context_result("error", "invalid_context")
     body = json.dumps(context_request, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -231,7 +229,7 @@ def forward_context_assembly(
             payload = _read_json_response(response)
     except urllib.error.HTTPError as exc:
         if exc.code == 409:
-            return _context_result("error", "context_unavailable")
+            return _context_result("error", "destination_changed")
         if exc.code in {400, 422}:
             return _context_result("error", "invalid_context")
         if exc.code in {403, 503}:
@@ -244,6 +242,14 @@ def forward_context_assembly(
 
     if not isinstance(payload, dict):
         return _context_result("incompatible", "malformed_response")
+    if payload.get("status") in {
+        "destination_confirmation_required",
+        "destination_saved",
+        "sensitive_preview",
+        "sensitive_confirmed",
+        "error",
+    }:
+        return _trust_response(payload)
     insertion_text = payload.get("insertion_text")
     context_chars = payload.get("context_chars")
     items = payload.get("items")
@@ -256,8 +262,7 @@ def forward_context_assembly(
         or not isinstance(items, list)
         or not items
         or not all(
-            isinstance(item, dict) and isinstance(item.get("item_id"), str)
-            for item in items
+            isinstance(item, dict) and isinstance(item.get("item_id"), str) for item in items
         )
     ):
         return _context_result("incompatible", "malformed_response")
@@ -265,13 +270,85 @@ def forward_context_assembly(
     marker_ids = CONTEXT_ITEM_PATTERN.findall(insertion_text)
     if len(item_ids) != len(set(item_ids)) or marker_ids != item_ids:
         return _context_result("incompatible", "malformed_response")
-    return _context_result(
+    result = _context_result(
         "ready",
         "context_ready",
         insertion_text=insertion_text,
         item_count=len(items),
         context_chars=context_chars,
     )
+    for field in (
+        "destination",
+        "destination_revision",
+        "sensitive_available",
+        "used",
+        "excluded_reasons",
+    ):
+        if field in payload:
+            result[field] = payload[field]
+    return result
+
+
+def _trust_response(payload: dict) -> dict:
+    """Pass bounded local preview data only for a recognized service response."""
+    status = payload["status"]
+    if status == "destination_confirmation_required":
+        spaces = payload.get("spaces")
+        valid = (
+            type(payload.get("destination_revision")) is int
+            and isinstance(spaces, list)
+            and len(spaces) <= 200
+            and all(
+                isinstance(s, dict)
+                and all(isinstance(s.get(k), str) for k in ("space_id", "scope_type", "name"))
+                for s in spaces
+            )
+        )
+        fields = (
+            "destination",
+            "destination_revision",
+            "allowed_space_ids",
+            "suggested_destination",
+            "reasons",
+            "spaces",
+        )
+    elif status == "destination_saved":
+        valid = (
+            payload.get("destination") in {"private", "work", "client", "shared"}
+            and type(payload.get("destination_revision")) is int
+        )
+        fields = ("destination", "destination_revision")
+    elif status == "sensitive_preview":
+        items = payload.get("items")
+        valid = (
+            isinstance(payload.get("preview_token"), str)
+            and len(payload["preview_token"]) <= 200
+            and isinstance(items, list)
+            and len(items) <= 5
+            and all(
+                isinstance(i, dict)
+                and isinstance(i.get("item_id"), str)
+                and type(i.get("version")) is int
+                and isinstance(i.get("text"), str)
+                and isinstance(i.get("sources"), list)
+                for i in items
+            )
+        )
+        fields = ("destination", "preview_token", "expires_in_seconds", "items")
+    elif status == "sensitive_confirmed":
+        valid = (
+            isinstance(payload.get("confirmation_token"), str)
+            and len(payload["confirmation_token"]) <= 200
+        )
+        fields = ("confirmation_token", "expires_in_seconds")
+    else:
+        valid = payload.get("reason") in {"context_unavailable", "confirmation_expired"}
+        fields = ("destination", "destination_revision", "sensitive_available", "excluded_reasons")
+    if not valid:
+        return _context_result("incompatible", "malformed_response")
+    response = _context_result(status, payload.get("reason", status))
+    response.update({key: payload[key] for key in fields if key in payload})
+    return response
 
 
 def _read_json_response(response: Any) -> Any:

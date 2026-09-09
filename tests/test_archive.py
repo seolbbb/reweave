@@ -4,6 +4,8 @@ import json
 import sqlite3
 import zipfile
 
+import pytest
+
 from reweave.archive import ArchiveStore, export_conversation_markdown, export_search_markdown
 
 
@@ -20,6 +22,126 @@ def test_import_fixtures_idempotent(tmp_path, fixtures_dir):
     assert second.parsed_conversations == 4
     assert second.inserted_conversations == 0
     assert second.inserted_messages == 0
+
+
+@pytest.mark.parametrize(
+    "filename,identity_field,time_field,title_field",
+    [
+        ("claude_sample.json", "uuid", "created_at", "name"),
+        ("chatgpt_sample.json", "id", "create_time", "title"),
+    ],
+)
+def test_distinct_explicit_ids_with_same_timestamp_remain_separate(
+    tmp_path, fixtures_dir, filename, identity_field, time_field, title_field
+):
+    payload = json.loads((fixtures_dir / filename).read_text(encoding="utf-8"))
+    for index, row in enumerate(payload):
+        row.setdefault(identity_field, f"synthetic-explicit-{index}")
+    payload[1][time_field] = payload[0][time_field]
+    payload[1][title_field] = payload[0][title_field]
+    export_path = tmp_path / "same-time.json"
+    export_path.write_text(json.dumps(payload), encoding="utf-8")
+    store = ArchiveStore(tmp_path / "archive.db")
+
+    first = store.import_path(export_path)
+    second = store.import_path(export_path)
+
+    assert first.inserted_conversations == 2
+    assert len(set(first.conversation_ids)) == 2
+    assert store.stats().total_conversations == 2
+    assert store.stats().total_messages == 6
+    assert {store.get_conversation(cid).source_id for cid in first.conversation_ids} == {
+        row[identity_field] for row in payload
+    }
+    assert second.inserted_conversations == second.updated_messages == 0
+    assert second.conversation_ids == first.conversation_ids
+
+
+@pytest.mark.parametrize(
+    "filename,identity_field,title_field",
+    [
+        ("claude_sample.json", "uuid", "name"),
+        ("chatgpt_sample.json", "id", "title"),
+    ],
+)
+def test_missing_identity_upgrades_without_losing_stable_id_on_later_export(
+    tmp_path, fixtures_dir, filename, identity_field, title_field
+):
+    payload = json.loads((fixtures_dir / filename).read_text(encoding="utf-8"))[:1]
+    explicit_id = payload[0].pop(identity_field, "synthetic-explicit-source")
+    export_path = tmp_path / "legacy.json"
+    store = ArchiveStore(tmp_path / "archive.db")
+
+    def import_current():
+        export_path.write_text(json.dumps(payload), encoding="utf-8")
+        return store.import_path(export_path)
+
+    original = import_current().conversation_ids[0]
+    payload[0][identity_field] = explicit_id
+    payload[0][title_field] = "Updated title after identity upgrade"
+    upgraded = import_current()
+    assert upgraded.inserted_conversations == 0
+    assert upgraded.conversation_ids == (original,)
+    assert store.get_conversation(original).source_id == explicit_id
+
+    payload[0].pop(identity_field)
+    assert import_current().conversation_ids == (original,)
+    assert store.get_conversation(original).source_id == explicit_id
+
+    payload[0][identity_field] = "different-explicit-source"
+    distinct = import_current()
+    assert distinct.inserted_conversations == 1
+    assert distinct.conversation_ids[0] != original
+    assert store.get_conversation(original).source_id == explicit_id
+    assert store.stats().total_conversations == 2
+
+
+def test_missing_identity_does_not_choose_between_same_timestamp_sources(tmp_path, fixtures_dir):
+    payload = json.loads((fixtures_dir / "claude_sample.json").read_text(encoding="utf-8"))
+    payload[1]["created_at"] = payload[0]["created_at"]
+    export_path = tmp_path / "sources.json"
+    export_path.write_text(json.dumps(payload), encoding="utf-8")
+    store = ArchiveStore(tmp_path / "archive.db")
+    known = store.import_path(export_path).conversation_ids
+    unknown = dict(payload[0])
+    unknown.pop("uuid")
+    unknown["name"] = "Legacy export without an identity"
+    export_path.write_text(json.dumps([unknown]), encoding="utf-8")
+
+    imported = store.import_path(export_path)
+
+    assert imported.inserted_conversations == 1
+    assert imported.conversation_ids[0] not in known
+    assert store.stats().total_conversations == 3
+    assert {store.get_conversation(cid).source_id for cid in known} == {
+        row["uuid"] for row in payload
+    }
+
+
+def test_legacy_internal_id_collision_cannot_override_explicit_source_identity(
+    tmp_path, fixtures_dir
+):
+    payload = json.loads((fixtures_dir / "claude_sample.json").read_text(encoding="utf-8"))[:1]
+    known_id = payload[0].pop("uuid")
+    path = tmp_path / "legacy.json"
+    store = ArchiveStore(tmp_path / "archive.db")
+
+    def import_current():
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return store.import_path(path)
+
+    original = import_current().conversation_ids[0]
+    payload[0]["uuid"] = known_id
+    assert import_current().conversation_ids == (original,)
+    # The old row kept its timestamp-derived internal ID during the identity upgrade.
+    payload[0]["uuid"] = payload[0]["created_at"]
+    distinct = import_current()
+
+    assert distinct.inserted_conversations == 1
+    assert distinct.conversation_ids[0] != original
+    assert store.get_conversation(original).source_id == known_id
+    assert import_current().conversation_ids == distinct.conversation_ids
+    assert store.stats().total_conversations == 2
 
 
 def test_import_path_single_json(tmp_path, chatgpt_sample_path):

@@ -96,7 +96,7 @@ def test_context_round_trip_survives_store_restart(tmp_path, fixtures_dir):
         context_schema_version = conn.execute(
             "SELECT value FROM schema_meta WHERE key = 'context_schema_version'"
         ).fetchone()[0]
-    assert context_schema_version == "5"
+    assert context_schema_version == "7"
 
 
 def test_save_brief_is_idempotent_for_one_analysis_version(tmp_path, fixtures_dir):
@@ -227,7 +227,7 @@ def test_app_startup_initializes_context_schema(tmp_path):
             conn.execute(
                 "SELECT value FROM schema_meta WHERE key = 'context_schema_version'"
             ).fetchone()[0]
-            == "5"
+            == "7"
         )
 
 
@@ -311,5 +311,5 @@ def test_context_schema_v1_migrates_analysis_metadata_without_losing_briefs(tmp_
             conn.execute(
                 "SELECT value FROM schema_meta WHERE key = 'context_schema_version'"
             ).fetchone()[0]
-            == "5"
+            == "7"
         )

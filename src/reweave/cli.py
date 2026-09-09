@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
+from functools import wraps
+from inspect import signature
 from pathlib import Path
 from typing import Annotated
 
@@ -14,6 +17,7 @@ from reweave.archive import ArchiveStore, export_conversation_markdown, export_s
 from reweave.archive_answers import answer_archive
 from reweave.config import Config
 from reweave.desktop import main as run_desktop
+from reweave.library_lock import library_lock
 from reweave.llm import LLMSettings
 from reweave.paths import get_app_paths
 from reweave.semantic import SearchEngine, SemanticIndex, SemanticUnavailableError
@@ -26,6 +30,25 @@ app = typer.Typer(
 )
 console = Console()
 DEFAULT_CONFIG = Config()
+
+
+def _with_library_lock(command):
+    """Preserve Typer parameters while excluding another owner before store construction."""
+    command_signature = signature(command)
+
+    @wraps(command)
+    def owned(*args, **kwargs):
+        bound = command_signature.bind(*args, **kwargs)
+        bound.apply_defaults()
+        with ExitStack() as resources:
+            try:
+                resources.enter_context(library_lock(bound.arguments["db"]))
+            except RuntimeError as exc:
+                console.print(f"[red]Library unavailable:[/red] {exc}")
+                raise typer.Exit(1) from exc
+            return command(*args, **kwargs)
+
+    return owned
 
 
 def version_callback(value: bool) -> None:
@@ -51,6 +74,7 @@ def main(
 
 
 @app.command("import")
+@_with_library_lock
 def import_(
     input_dir: Annotated[
         Path, typer.Argument(help="Directory, JSON file, or zip archive to import.")
@@ -77,6 +101,7 @@ def import_(
 
 
 @app.command()
+@_with_library_lock
 def search(
     query: Annotated[str, typer.Argument(help="Full-text search query.")],
     db: Annotated[
@@ -140,6 +165,7 @@ def search(
 
 
 @app.command("index")
+@_with_library_lock
 def index_(
     db: Annotated[
         Path, typer.Option("--db", help="SQLite archive database.")
@@ -162,6 +188,7 @@ def index_(
 
 
 @app.command("ask")
+@_with_library_lock
 def ask(
     question: Annotated[str, typer.Argument(help="Question to answer from the archive.")],
     db: Annotated[
@@ -199,6 +226,7 @@ def ask(
 
 
 @app.command()
+@_with_library_lock
 def show(
     conversation_id: Annotated[str, typer.Argument(help="Conversation ID to display.")],
     db: Annotated[
@@ -224,6 +252,7 @@ def show(
 
 
 @app.command()
+@_with_library_lock
 def stats(
     db: Annotated[
         Path, typer.Option("--db", help="SQLite archive database.")
@@ -259,6 +288,7 @@ def stats(
 
 
 @app.command("export")
+@_with_library_lock
 def export_(
     conversation_id: Annotated[
         str | None, typer.Argument(help="Conversation ID to export.")
@@ -321,7 +351,8 @@ def app_(
         static_dir = None
 
     console.print(f"[green]Starting Reweave app:[/green] http://{host}:{port}")
-    uvicorn.run(create_app(db, static_dir=static_dir), host=host, port=port)
+    with library_lock(db):
+        uvicorn.run(create_app(db, static_dir=static_dir), host=host, port=port)
 
 
 @app.command("desktop")

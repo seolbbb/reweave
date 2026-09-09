@@ -7,13 +7,17 @@ from collections import Counter
 from dataclasses import dataclass
 
 from reweave.context_library import ContextItem, ContextLibraryStore, ContextScope
+from reweave.context_retrieval import (
+    ContextRetriever,
+    RetrievalDiagnostics,
+    RetrievedContextItem,
+    scope_is_allowed,
+)
 
 REWEAVE_BLOCK_PATTERN = re.compile(
     r"<reweave_context>.*?</reweave_context>", re.IGNORECASE | re.DOTALL
 )
-REWEAVE_ITEM_PATTERN = re.compile(
-    r"^\[Reweave:([A-Za-z0-9_-]+)\]\s", re.IGNORECASE | re.MULTILINE
-)
+REWEAVE_ITEM_PATTERN = re.compile(r"^\[Reweave:([A-Za-z0-9_-]+)\]\s", re.IGNORECASE | re.MULTILINE)
 TERM_PATTERN = re.compile(r"[\w]+(?:[-.][\w]+)*", re.UNICODE)
 WHITESPACE_PATTERN = re.compile(r"\s+")
 STOP_TERMS = {
@@ -93,6 +97,9 @@ class AssembledContextItem:
     source_title: str
     source_message_index: int
     score: float
+    reasons: tuple[str, ...] = ()
+    matched_terms: tuple[str, ...] = ()
+    source_changed: bool = False
 
 
 @dataclass(frozen=True)
@@ -102,11 +109,15 @@ class ContextAssemblyResult:
     context_chars: int
     context_budget_chars: int
     truncated: bool
+    diagnostics: RetrievalDiagnostics | None = None
 
 
 def assemble_context(
     store: ContextLibraryStore,
     request: ContextAssemblyInput,
+    *,
+    retriever: ContextRetriever | None = None,
+    sensitive_versions: dict[str, int] | None = None,
 ) -> ContextAssemblyResult:
     """Assemble allowed Context Items without persisting the current chat or draft."""
     _validate_request(request)
@@ -114,38 +125,55 @@ def assemble_context(
     previously_supplied = _previously_supplied_item_ids(request.messages)
     allowed_scopes = {(scope.scope_type, scope.scope_key) for scope in request.allowed_scopes}
 
-    ranked: list[tuple[float, ContextItem]] = []
-    candidates = sorted(store.list_items(limit=None), key=lambda item: item.id)
-    for item in candidates:
-        if not _is_allowed(item, request.destination, allowed_scopes):
-            continue
-        if item.id.casefold() in previously_supplied:
-            continue
-        score = _relevance_score(item, query_weights, request.destination, allowed_scopes)
-        if score <= 0:
-            continue
-        ranked.append((score, item))
-
-    ranked.sort(key=lambda pair: (-pair[0], -pair[1].confidence, pair[1].id))
-    deduplicated: list[tuple[float, ContextItem]] = []
-    seen_text: set[str] = set()
-    for score, item in ranked:
-        canonical_key = WHITESPACE_PATTERN.sub(" ", item.canonical_text).strip().casefold()
-        if canonical_key in seen_text:
-            continue
-        seen_text.add(canonical_key)
-        deduplicated.append((score, item))
-    ranked = deduplicated
-    if not ranked:
+    engine = retriever or ContextRetriever(store)
+    allowed_scopes = engine.canonical_allowed_scopes(allowed_scopes)
+    query = "\n".join(
+        [
+            _strip_reweave_blocks(request.draft),
+            *(_strip_reweave_blocks(message.content) for message in request.messages[-8:]),
+        ]
+    )
+    retrieval = engine.retrieve(
+        query=query,
+        query_weights=query_weights,
+        destination=request.destination,
+        allowed_scopes=allowed_scopes,
+        excluded_ids=previously_supplied,
+        sensitive_versions=sensitive_versions,
+    )
+    if not retrieval.hits:
         raise ContextUnavailableError("No allowed relevant Context Items are available.")
 
     selected: list[AssembledContextItem] = []
     rendered_items: list[str] = []
-    for score, item in ranked:
-        assembled = _to_assembled_item(item, score, request.destination, allowed_scopes)
+    seen_text: set[str] = set()
+    skipped = False
+    for hit in retrieval.hits:
+        item = engine.load_item(
+            hit,
+            destination=request.destination,
+            allowed_scopes=allowed_scopes,
+            sensitive_versions=sensitive_versions,
+        )
+        if item is None:
+            skipped = True
+            continue
+        canonical_key = WHITESPACE_PATTERN.sub(" ", item.canonical_text).strip().casefold()
+        if canonical_key in seen_text:
+            continue
+        seen_text.add(canonical_key)
+        assembled = _to_assembled_item(
+            item,
+            hit.score,
+            request.destination,
+            allowed_scopes,
+            reasons=hit.reasons,
+            matched_terms=hit.matched_terms,
+        )
         rendered = _render_item(assembled)
         candidate_text = HEADER + "\n\n".join([*rendered_items, rendered]) + "\n" + FOOTER
         if len(candidate_text) > request.max_context_chars:
+            skipped = True
             continue
         selected.append(assembled)
         rendered_items.append(rendered)
@@ -159,7 +187,8 @@ def assemble_context(
         items=tuple(selected),
         context_chars=len(insertion_text),
         context_budget_chars=request.max_context_chars,
-        truncated=len(selected) < len(ranked),
+        truncated=skipped,
+        diagnostics=retrieval.diagnostics,
     )
 
 
@@ -212,12 +241,14 @@ def _validate_request(request: ContextAssemblyInput) -> None:
 
 
 def _query_weights(request: ContextAssemblyInput) -> Counter[str]:
-    weights: Counter[str] = Counter()
-    for term in _terms(_strip_reweave_blocks(request.draft)):
-        weights[term] += 3
-    for message in request.messages:
-        for term in _terms(_strip_reweave_blocks(message.content)):
-            weights[term] += 1
+    draft_counts = Counter(_terms(_strip_reweave_blocks(request.draft)))
+    weights = Counter({term: 6 * min(count, 2) for term, count in draft_counts.items()})
+    background: Counter[str] = Counter()
+    for age, message in enumerate(reversed(request.messages)):
+        influence = (2 if message.role == "user" else 1) if age < 8 else 0.25
+        for term in set(_terms(_strip_reweave_blocks(message.content))):
+            background[term] = min(background[term] + influence, 4)
+    weights.update(background)
     return weights
 
 
@@ -237,7 +268,8 @@ def _previously_supplied_item_ids(messages: tuple[CurrentChatMessage, ...]) -> s
     return {
         item_id.casefold()
         for message in messages
-        for item_id in REWEAVE_ITEM_PATTERN.findall(message.content)
+        for block in REWEAVE_BLOCK_PATTERN.findall(message.content)
+        for item_id in REWEAVE_ITEM_PATTERN.findall(block)
     }
 
 
@@ -246,14 +278,19 @@ def _is_allowed(
     destination: str,
     allowed_scopes: set[tuple[str, str]],
 ) -> bool:
-    if item.status != "active" or item.sensitivity != "normal":
-        return False
-    safe_scope_types = DESTINATION_SCOPE_TYPES[destination]
-    return bool(_matching_scopes(item, destination, safe_scope_types, allowed_scopes))
+    return scope_is_allowed(
+        sensitivity=item.sensitivity,
+        status=item.status,
+        epistemic_kind=item.epistemic_kind,
+        confidence=item.confidence,
+        scopes=item.scopes,
+        destination=destination,
+        allowed_scopes=allowed_scopes,
+    )
 
 
 def _matching_scopes(
-    item: ContextItem,
+    item: ContextItem | RetrievedContextItem,
     destination: str,
     safe_scope_types: set[str],
     allowed_scopes: set[tuple[str, str]],
@@ -289,9 +326,7 @@ def _relevance_score(
     )
     if overlap == 0:
         return 0.0
-    matching_scope_confidence = max(
-        scope.confidence for scope in matching_scopes
-    )
+    matching_scope_confidence = max(scope.confidence for scope in matching_scopes)
     return round(
         float(overlap)
         + item.confidence * 0.5
@@ -302,10 +337,13 @@ def _relevance_score(
 
 
 def _to_assembled_item(
-    item: ContextItem,
+    item: RetrievedContextItem,
     score: float,
     destination: str,
     allowed_scopes: set[tuple[str, str]],
+    *,
+    reasons: tuple[str, ...] = (),
+    matched_terms: tuple[str, ...] = (),
 ) -> AssembledContextItem:
     evidence = item.evidence[0]
     matching_scopes = _matching_scopes(
@@ -315,8 +353,7 @@ def _to_assembled_item(
         allowed_scopes,
     )
     scope_labels = tuple(
-        _scope_label(scope.scope_type, scope.scope_key)
-        for scope in matching_scopes
+        _scope_label(scope.scope_type, scope.scope_key) for scope in matching_scopes
     )
     return AssembledContextItem(
         item_id=item.id,
@@ -326,9 +363,12 @@ def _to_assembled_item(
         confidence=item.confidence,
         scopes=scope_labels,
         source_provider=evidence.source_provider,
-        source_title=evidence.source_title,
+        source_title=evidence.source_title if destination == "private" else "Local source",
         source_message_index=evidence.source_message_index,
         score=score,
+        reasons=reasons,
+        matched_terms=matched_terms,
+        source_changed=evidence.source_changed,
     )
 
 
