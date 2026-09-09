@@ -7,13 +7,21 @@ content scripts. `activeTab` and `scripting` grant temporary access only after t
 extension and clicks Save or Use Reweave; the popup's availability check never reads the provider
 page.
 
-Use Reweave reads the complete current conversation and non-empty draft only after the click. A
-supported signed-in conversation URL is treated as a private AI destination, so the local app may
-retrieve relevant normal-sensitivity Context across spaces without exposing its scope index to the
-browser. Shared, unknown, streaming, incomplete, empty, oversized, or changed pages fail closed.
-The returned bounded `<reweave_context>` block is added before the user's unchanged draft. A later
-explicit Use replaces that block instead of duplicating it, and a concurrent draft edit prevents
-insertion. Use never submits or saves the conversation and never refreshes automatically.
+Use Reweave reads the complete current conversation and non-empty draft only after
+the click. A supported signed-in URL establishes provider identity. On first use,
+confirm the destination: private chats may use relevant normal-sensitivity Context
+across spaces; Work, Client, Shared and unknown destinations require an explicit
+scope allowlist. Destination corrections are remembered for that provider conversation.
+
+Sensitive material stays local unless a separate preview and one-use confirmation
+approve exact current item versions for the current request. Changed drafts, scope
+revisions or item versions invalidate consent. Unresolved contradictions remain
+excluded. The popup explains used and excluded Context without storing the chat or draft.
+
+The bounded `<reweave_context>` block is added before the unchanged draft. A later
+explicit Use replaces it instead of duplicating it, and a concurrent draft edit prevents
+insertion. Use never submits, saves or refreshes automatically. Shared URLs, streaming,
+incomplete, empty, oversized and changed provider pages fail closed.
 
 After a successful Save, the injected adapter remains active only for that page lifetime. It observes
 structural turn and role markers rather than message text. When at least one new complete assistant

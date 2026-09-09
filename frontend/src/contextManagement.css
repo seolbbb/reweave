@@ -1,0 +1,241 @@
+.contextManagement {
+  border-top: 1px solid var(--color-border);
+  padding-top: 24px;
+}
+.contextManagementHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.contextManagementHeading h3 {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.9375rem;
+}
+.contextManagement > .contextDetailMuted {
+  margin: 12px 0;
+}
+.contextEditor {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-subtle);
+}
+.contextEditor h4,
+.restoreConfirmation h4 {
+  font-size: 0.9375rem;
+  margin: 0;
+}
+.contextEditor label,
+.spacesManagerBody label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+.contextEditor input,
+.contextEditor textarea,
+.contextEditor select,
+.spacesManagerBody input,
+.spacesManagerBody select {
+  width: 100%;
+  min-width: 0;
+  background: var(--color-surface);
+}
+.contextEditor textarea {
+  resize: vertical;
+  min-height: 100px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  padding: 12px;
+  color: var(--color-text);
+  font: 400 1rem/1.55 var(--font-sans);
+}
+.contextEditorGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.scopeEditor {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 16px;
+  margin: 0;
+}
+.scopeEditor legend {
+  padding: 0 6px;
+  font-size: 0.875rem;
+  color: var(--color-text);
+}
+.scopeEditorRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+.scopeEditorRow label {
+  flex: 1 1 140px;
+}
+.scopeEditorRow button {
+  flex: 0 0 44px;
+}
+.contextMutationNotice {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: var(--color-accent);
+  font-size: 0.875rem;
+  margin: 12px 0;
+}
+.contextMutationNotice svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.contextEvidenceError .secondaryButton {
+  margin-top: 12px;
+}
+.contextVersionHistory {
+  margin-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+.contextVersionHistory > summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 48px;
+  padding: 12px 0;
+  color: var(--color-accent);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.contextVersionHistory > summary svg:last-child {
+  margin-left: auto;
+}
+.contextVersion {
+  display: grid;
+  gap: 10px;
+  padding: 16px 0;
+  border-top: 1px solid var(--color-border);
+}
+.contextVersion header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  font-size: 0.875rem;
+}
+.contextVersion time {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+.contextVersion > p {
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.contextVersion .contextVersionMeta,
+.contextVersion .versionRationale {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+.currentSavedVersion,
+.restoreConfirmation {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.875rem;
+}
+.currentSavedVersion p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.restoreConfirmation {
+  margin-top: 16px;
+  background: var(--color-accent-subtle);
+}
+.explorerManagement {
+  grid-column: 1 / -1;
+  border-bottom: 1px solid var(--color-border);
+  padding: 0 16px;
+}
+.spacesManagerBody {
+  display: grid;
+  gap: 16px;
+  padding: 12px 0 20px;
+}
+.spacesManagerBody .contextManagementHeading > div {
+  display: grid;
+  gap: 8px;
+}
+.spaceEditor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+}
+.spaceEditor form,
+.spaceMerge {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.spaceMerge > summary {
+  min-height: 44px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--color-accent);
+}
+.spaceMerge > label {
+  margin: 12px 0;
+}
+.inferenceRationale {
+  border-left: 2px solid var(--color-warning);
+  padding: 12px 16px;
+  background: var(--color-warning-subtle);
+  font-size: 0.9375rem;
+}
+.inferenceRationale > p {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.sourceChangedNotice {
+  color: var(--color-warning);
+  font-size: 0.8125rem;
+}
+.contextRelatedLinks .relatedContextLink > span {
+  display: grid;
+  gap: 4px;
+}
+.contextRelatedLinks .relatedContextLink small {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+.contextRelatedLinks .relatedContextLink strong {
+  font-weight: 500;
+}
+@media (max-width: 760px) {
+  .contextManagementHeading {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .contextEditor {
+    padding: 16px;
+  }
+  .contextEditorGrid,
+  .spaceEditor {
+    grid-template-columns: 1fr;
+  }
+}

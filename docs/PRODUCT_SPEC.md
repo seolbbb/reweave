@@ -3,7 +3,7 @@
 ## Document control
 
 - Status: accepted
-- Last reviewed: 2026-07-21
+- Last reviewed: 2026-09-09
 - Working language: English
 - Product promise: Reweave turns the AI conversations you choose into a living, linked context library, then brings the right context back to the AI you already use.
 
@@ -79,6 +79,12 @@ Local diagnostic measures may include:
 - analysis latency and BYOK cost.
 
 These measures diagnose problems; they do not replace the product owner's release judgment.
+
+The owner explicitly authorized synthetic implementation and isolated verification before
+real-data dogfooding (DEC-026). Real-data validation is a mandatory final acceptance condition,
+not a prerequisite to implementing PHASE-002 or later accepted scope. Synthetic, browser, and
+packaging evidence must never be presented as actual usefulness. The full execution contract
+and evidence coverage are retained in `docs/execution/2026-09-09-product-completion.md`.
 
 ### Unacceptable outcomes
 
@@ -172,6 +178,15 @@ Context Home is the primary reading surface. It presents:
 
 ### Navigation
 
+The accepted visual direction is A — Reading Room (DEC-027). Home, Explore, and Sources are
+the primary navigation; Search remains available everywhere, Import is an explicit action,
+and Settings stays in the navigation footer. Graph is an auxiliary Explore view and Review
+is an exception workflow. Use the preserved design system in `docs/design/reading-room/`:
+ivory canvas, sage actions, readable document-first Home with a narrow companion column,
+sans-serif body at 16px/1.55 and short serif headings around 30–32px. Fonts must work offline.
+All screens, onboarding, queues, trust controls, settings, and the extension share these tokens.
+Desktop "How to use in chat" opens extension instructions, never automatic insertion.
+
 - A readable document links to spaces, projects, Context Items, and source evidence.
 - Explorer provides folder-like orientation even though an item may link to multiple spaces.
 - Global keyword and semantic search remains available from every level.
@@ -233,6 +248,10 @@ Each item must support:
 - Archived conversation content is untrusted data, never system instruction.
 - The prompt is versioned and visible.
 - Advanced users may add personal analysis instructions, but cannot override evidence, prompt-injection, sensitivity, or scope rules.
+- Long selected sources are processed completely through bounded resumable segments; partial
+  work remains visibly incomplete. Explicit reanalysis has a durable generation identity and
+  preserves source-bound user corrections. Matching existing Context uses bounded compatible
+  candidates, with every protective named route grounded before cross-source transmission.
 
 ### Linking and deduplication
 
@@ -302,6 +321,10 @@ The user-facing Ask Archive question feature is removed. Retrieval and citation 
 - Stale context is not automatically deleted. Confidence decays and newer direct evidence or correction can supersede it.
 - Encrypted versioned backups are written to a user-selected folder.
 - The complete local library can be restored or moved from one backup artifact.
+- Restore preserves current-day local usage reservation maxima and spent calls for matching
+  restored analysis-run identities, without moving counts between generations, and disconnects imported
+  credentials. Supported app and CLI processes must hold Library ownership before opening
+  stores; shutdown keeps ownership until every active writer has finished.
 
 ## Safety, privacy, and data
 
@@ -324,12 +347,18 @@ The user-facing Ask Archive question feature is removed. Retrieval and citation 
 - Interface language: English first.
 - Offline behavior: capture, browsing, search, and queued work remain available without an LLM connection; remote analysis waits safely.
 - Cost behavior: prefer local parsing, search, routing, and duplicate detection; use strong remote models for synthesis; show estimated use and enforce a user-visible safe limit.
+- Connection changes and analysis pause stop subsequent unsent provider attempts, including
+  key failover. Already sent requests may finish; their reservations are retained.
 - Durability: capture completes before analysis; queued work survives restart; repeat import and save are idempotent.
 - Retrieval quality: hierarchy cannot exclude globally relevant items; retrieval evaluation must include cross-space cases and hard exact-identifier queries.
 - Prompt quality: prompt revisions require a versioned golden set covering extraction correctness, source grounding, useful synthesis, hallucination, prompt injection, and scope leakage.
 - Explainability: used context, excluded sensitive context, source evidence, automatic changes, and undo history remain inspectable without interrupting normal work.
 - Accessibility: all core Save, Use, search, navigation, review, backup, restore, and correction flows must be keyboard accessible and meet the repository's chosen accessibility gate.
 - Packaging: every implementation task must produce and smoke-test the required Windows executable before completion.
+- Development verification must not disturb the owner's active Windows desktop. Use isolated
+  data, credentials, runtime descriptors, ports, and fresh headless browser profiles; do not
+  operate physical input, clipboard, active profiles, visible native windows, registry setup,
+  or automatic startup without separate permission. Build evidence is not installation evidence.
 
 ## Acceptance criteria
 

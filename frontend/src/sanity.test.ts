@@ -237,18 +237,22 @@ describe("frontend state helpers", () => {
   it("starts in Context Home with shared primary navigation", () => {
     const html = renderToStaticMarkup(createElement(Workspace));
 
-    expect(html).toContain("Linked Context Library");
+    expect(html).toContain("Context Home");
     expect(html).toContain("Gathering your Context Library");
     expect(html).toContain("Context");
     expect(html).toContain("Library");
-    expect(html).toContain("Audit");
-    expect(html).toContain("Reports");
+    expect(html).toContain("Explore");
+    expect(html).toContain("Sources");
+    expect(html).toContain('role="search"');
+    expect(html).not.toContain(">Audit<");
+    expect(html).not.toContain(">Reports<");
+    expect(html).not.toContain("Ask archive");
     expect(html).toContain("Import");
     expect(html).toContain("Settings");
     expect(html).not.toContain("Report outline");
   });
 
-  it("renders Context Home and Explorer controls before local data loads", () => {
+  it("renders the selected destination without duplicate tab navigation", () => {
     const html = renderToStaticMarkup(
       createElement(ContextWorkspace, {
         onOpenLibrary: () => undefined,
@@ -256,10 +260,9 @@ describe("frontend state helpers", () => {
       })
     );
 
-    expect(html).toContain('role="tablist"');
-    expect(html).toContain('aria-selected="true"');
-    expect(html).toContain("Home");
-    expect(html).toContain("Explorer");
+    expect(html).not.toContain('role="tablist"');
+    expect(html).toContain("Context Home");
+    expect(html).toContain("Refresh Context Library");
     expect(html).toContain("Loading source-grounded briefs and items from this device");
   });
 

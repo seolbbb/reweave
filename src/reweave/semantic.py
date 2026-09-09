@@ -6,6 +6,7 @@ import heapq
 import shutil
 import sqlite3
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -13,6 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from reweave.archive import ArchiveStore, ConversationSearchResult, SearchResult
+from reweave.source_filters import add_context_source_filter
 
 MODEL_ID = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 MAX_CHUNK_CHARS = 1_500
@@ -199,6 +201,8 @@ class SemanticIndex:
         date_from: str | None = None,
         date_to: str | None = None,
         title: str | None = None,
+        space_id: str | None = None,
+        item_type: str | None = None,
         limit: int = 50,
         embedder: object | None = None,
     ) -> list[SemanticHit]:
@@ -223,6 +227,7 @@ class SemanticIndex:
         if title:
             clauses.append("c.title LIKE ?")
             params.append(f"%{title}%")
+        add_context_source_filter(clauses, params, space_id=space_id, item_type=item_type)
 
         heap: list[tuple[float, int, sqlite3.Row]] = []
         sequence = 0
@@ -292,11 +297,16 @@ class SemanticIndex:
     def _model_downloaded(self) -> bool:
         return self.models_dir.exists() and any(self.models_dir.rglob("*.onnx"))
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
 
 class SearchEngine:
@@ -315,6 +325,8 @@ class SearchEngine:
         date_from: str | None = None,
         date_to: str | None = None,
         title: str | None = None,
+        space_id: str | None = None,
+        item_type: str | None = None,
         limit: int = 20,
     ) -> tuple[list[SearchResult], str]:
         if mode not in {"auto", "keyword", "semantic"}:
@@ -332,6 +344,8 @@ class SearchEngine:
                 date_from=date_from,
                 date_to=date_to,
                 title=title,
+                space_id=space_id,
+                item_type=item_type,
                 limit=max(50, limit * 3),
             )
             if use_keyword
@@ -344,6 +358,8 @@ class SearchEngine:
                 date_from=date_from,
                 date_to=date_to,
                 title=title,
+                space_id=space_id,
+                item_type=item_type,
                 limit=max(50, limit * 3),
             )
             if use_semantic
@@ -408,6 +424,8 @@ class SearchEngine:
         date_from: str | None = None,
         date_to: str | None = None,
         title: str | None = None,
+        space_id: str | None = None,
+        item_type: str | None = None,
         limit: int = 20,
         excerpts_per_conversation: int = 3,
     ) -> tuple[list[ConversationSearchResult], str]:
@@ -418,6 +436,8 @@ class SearchEngine:
             date_from=date_from,
             date_to=date_to,
             title=title,
+            space_id=space_id,
+            item_type=item_type,
             limit=max(limit * excerpts_per_conversation * 3, 50),
         )
         grouped: dict[str, list[SearchResult]] = {}

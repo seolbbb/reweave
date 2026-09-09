@@ -123,7 +123,7 @@ def _assembly_input(**changes):
 def _api_payload(provider="chatgpt"):
     return {
         "provider": provider,
-        "external_id": f"{provider}-current-42",
+        "external_id": "12345678-1234-4234-8234-123456789abc",
         "messages": [
             {"role": "user", "content": "Continue the Reweave project."},
             {"role": "assistant", "content": "Source provenance matters."},
@@ -218,9 +218,7 @@ def test_context_assembly_honors_budget_and_excludes_previously_supplied_items(
     assert items["budget"].id in refreshed.insertion_text
 
 
-def test_context_assembly_fails_closed_for_scope_sensitivity_and_relevance(
-    tmp_path, fixtures_dir
-):
+def test_context_assembly_fails_closed_for_scope_sensitivity_and_relevance(tmp_path, fixtures_dir):
     context, _ = _seed_assembly_context(tmp_path / "archive.db", fixtures_dir)
 
     with pytest.raises(ValueError, match="unsafe"):
@@ -302,6 +300,13 @@ def test_authenticated_context_assembly_api_normalizes_supported_providers_witho
         ).status_code
         == 403
     )
+    initial = client.post(
+        "/api/context/assembly",
+        json=_api_payload(provider),
+        headers={"X-Reweave-Bridge-Token": token},
+    )
+    assert initial.json()["status"] == "destination_confirmation_required"
+    _save_api_destination(client, token, provider)
     response = client.post(
         "/api/context/assembly",
         json=_api_payload(provider),
@@ -319,6 +324,18 @@ def test_authenticated_context_assembly_api_normalizes_supported_providers_witho
     assert _row_counts(db_path) == before
 
 
+def _save_api_destination(client, token, provider="chatgpt"):
+    payload = _api_payload(provider)
+    payload.update(
+        action="save_destination", destination="private", allowed_space_ids=[], expected_revision=0
+    )
+    response = client.post(
+        "/api/context/assembly", json=payload, headers={"X-Reweave-Bridge-Token": token}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "destination_saved"
+
+
 def test_context_assembly_api_rejects_invalid_oversized_and_unavailable_requests(
     tmp_path, fixtures_dir
 ):
@@ -329,71 +346,41 @@ def test_context_assembly_api_rejects_invalid_oversized_and_unavailable_requests
     client = TestClient(
         create_app(db_path, data_dir=tmp_path / "app-data", extension_bridge_token=token)
     )
-
-    empty_draft = _api_payload()
-    empty_draft["draft"] = "   "
-    assert (
-        client.post("/api/context/assembly", json=empty_draft, headers=headers).status_code
-        == 422
-    )
-
-    unknown_destination = _api_payload()
-    unknown_destination["destination"] = "unknown"
-    assert (
-        client.post("/api/context/assembly", json=unknown_destination, headers=headers).status_code
-        == 422
-    )
-
-    unknown_scope = _api_payload()
-    unknown_scope["allowed_scopes"] = [{"scope_type": "unknown", "scope_key": ""}]
-    assert (
-        client.post("/api/context/assembly", json=unknown_scope, headers=headers).status_code
-        == 422
-    )
-
-    unsafe_scope = _api_payload()
-    unsafe_scope["destination"] = "shared"
-    unsafe_scope["allowed_scopes"] = [{"scope_type": "personal", "scope_key": ""}]
-    assert (
-        client.post("/api/context/assembly", json=unsafe_scope, headers=headers).status_code
-        == 422
-    )
-
-    missing_non_private_scope = _api_payload()
-    missing_non_private_scope["destination"] = "work"
-    missing_non_private_scope["allowed_scopes"] = []
-    assert (
-        client.post(
-            "/api/context/assembly", json=missing_non_private_scope, headers=headers
-        ).status_code
-        == 422
-    )
-
-    oversized = _api_payload()
-    oversized["messages"] = [{"role": "user", "content": "x" * 50_001}]
-    assert client.post("/api/context/assembly", json=oversized, headers=headers).status_code == 422
-
-    incomplete = _api_payload()
-    incomplete["messages"] = [{"role": "user", "content": "Still waiting for a response."}]
-    assert client.post("/api/context/assembly", json=incomplete, headers=headers).status_code == 422
-
-    total_oversized = _api_payload()
-    total_oversized["messages"] = [
-        {"role": "user" if index % 2 == 0 else "assistant", "content": "x" * 50_000}
-        for index in range(5)
-    ]
-    assert (
-        client.post("/api/context/assembly", json=total_oversized, headers=headers).status_code
-        == 422
-    )
-
+    # Untrusted request fields cannot grant or alter a saved destination.
+    for destination in ("private", "unknown", "shared", "work"):
+        payload = _api_payload()
+        payload.update(destination=destination, allowed_scopes=[{"scope_type": "personal"}])
+        response = client.post("/api/context/assembly", json=payload, headers=headers)
+        assert response.status_code == 200
+        assert response.json()["status"] == "destination_confirmation_required"
+    _save_api_destination(client, token)
+    for update in (
+        {"draft": "   "},
+        {"messages": [{"role": "user", "content": "x" * 50_001}]},
+        {"messages": [{"role": "user", "content": "Still waiting for a response."}]},
+        {
+            "messages": [
+                {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 50_000}
+                for i in range(5)
+            ]
+        },
+    ):
+        payload = _api_payload()
+        payload.update(update)
+        assert (
+            client.post("/api/context/assembly", json=payload, headers=headers).status_code == 400
+        )
     unavailable = _api_payload()
-    unavailable["messages"] = []
-    unavailable["draft"] = "unmatched zephyr quartz"
-    assert (
-        client.post("/api/context/assembly", json=unavailable, headers=headers).status_code
-        == 409
+    unavailable.update(messages=[], draft="unmatched zephyr quartz")
+    response = client.post("/api/context/assembly", json=unavailable, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["reason"] == "context_unavailable"
+    unsafe_choice = _api_payload()
+    unsafe_choice.update(
+        action="save_destination", destination="work", allowed_space_ids=[], expected_revision=1
     )
-
+    assert (
+        client.post("/api/context/assembly", json=unsafe_choice, headers=headers).status_code == 400
+    )
     inactive = TestClient(create_app(tmp_path / "inactive.db", data_dir=tmp_path / "inactive"))
     assert inactive.post("/api/context/assembly", json=_api_payload()).status_code == 503

@@ -186,8 +186,11 @@ function collectContextRequestFromPage() {
     : { ok: false, reason: "changed_dom" };
 }
 
-function insertContextIntoPage(insertionText, expectedDraft, expectedExternalId) {
+function insertContextIntoPage(insertionText, expectedDraft, expectedExternalId, expectedProvider) {
   const adapter = globalThis.__reweaveProviderAdapter;
+  if (adapter?.provider !== expectedProvider) {
+    return { ok: false, reason: "conversation_changed" };
+  }
   return typeof adapter?.insertContext === "function"
     ? adapter.insertContext(insertionText, expectedDraft, expectedExternalId)
     : { ok: false, reason: "changed_dom" };
@@ -269,16 +272,18 @@ function installReminder(tabId, context, capture, done) {
   );
 }
 
-function forwardContextAssembly(context, extraction, sendResponse, onReady) {
+function forwardContextAssembly(context, extraction, sendResponse, onReady, options = {}) {
   const contextRequest = {
     provider: context.provider.id,
     external_id: context.externalId,
     messages: extraction.messages,
     draft: extraction.draft,
-    destination: "private",
-    allowed_scopes: [],
     max_context_chars: CONTEXT_BUDGET_CHARS,
+    action: options.action || "use",
   };
+  for (const key of ["destination", "allowed_space_ids", "expected_revision", "preview_token", "selected_items", "confirmation_token"]) {
+    if (options[key] !== undefined) contextRequest[key] = options[key];
+  }
   const nativeRequest = {
     type: "assemble_context",
     protocol_version: PROTOCOL_VERSION,
@@ -314,7 +319,7 @@ function forwardContextAssembly(context, extraction, sendResponse, onReady) {
     if (
       response?.type !== "context_result" ||
       response?.protocol_version !== PROTOCOL_VERSION ||
-      !["ready", "error", "unavailable", "incompatible"].includes(response.status) ||
+      !["ready", "error", "unavailable", "incompatible", "destination_confirmation_required", "destination_saved", "sensitive_preview", "sensitive_confirmed"].includes(response.status) ||
       (response.status === "ready" && !validReady)
     ) {
       sendResponse(
@@ -324,20 +329,38 @@ function forwardContextAssembly(context, extraction, sendResponse, onReady) {
       );
       return;
     }
+    if (response.status === "sensitive_confirmed") {
+      if (options.action !== "confirm_sensitive" || typeof response.confirmation_token !== "string") {
+        sendResponse(contextResponse("incompatible", "malformed_response"));
+        return;
+      }
+      // This is the same explicit 'Use selected items once' action. The one-use
+      // grant is bound to this exact request; the adapter still checks the draft.
+      forwardContextAssembly(context, extraction, sendResponse, onReady, {
+        action: "use", confirmation_token: response.confirmation_token,
+      });
+      return;
+    }
     if (response.status !== "ready") {
-      sendResponse({ ...response, provider: context.provider.id });
+      sendResponse({ ...response, provider: context.provider.id, external_id: context.externalId });
       return;
     }
     onReady(response);
   });
 }
 
-function useReweave(sendResponse) {
+function useReweave(sendResponse, options = {}) {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tab = tabs?.[0];
     const context = contextForUrl(tab?.url);
     if (chrome.runtime.lastError || !Number.isInteger(tab?.id) || !context) {
       sendResponse(contextResponse("error", "unsupported_page"));
+      return;
+    }
+    if (options.expected_identity &&
+        (options.expected_identity.provider !== context.provider.id ||
+         options.expected_identity.external_id !== context.externalId)) {
+      sendResponse(contextResponse("error", "conversation_changed"));
       return;
     }
 
@@ -394,6 +417,7 @@ function useReweave(sendResponse) {
                     nativeResponse.insertion_text,
                     extraction.expected_draft,
                     context.externalId,
+                    context.provider.id,
                   ],
                 },
                 (insertResults) => {
@@ -424,12 +448,17 @@ function useReweave(sendResponse) {
                           provider: context.provider.id,
                           item_count: nativeResponse.item_count,
                           context_chars: nativeResponse.context_chars,
+                          external_id: context.externalId,
+                          destination: nativeResponse.destination,
+                          sensitive_available: nativeResponse.sensitive_available,
+                          used: nativeResponse.used,
+                          excluded_reasons: nativeResponse.excluded_reasons,
                         }),
                       ),
                   );
                 },
               );
-            });
+            }, options);
           },
         );
       },
@@ -555,7 +584,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "reweave:use-context") {
-    useReweave(sendResponse);
+    // A chat page or content script cannot approve destination or sensitive data.
+    const fromPopup = typeof chrome.runtime.getURL === "function" &&
+      sender?.id === chrome.runtime.id && !sender?.tab &&
+      sender?.url === chrome.runtime.getURL("popup.html");
+    if (!fromPopup) {
+      sendResponse(contextResponse("error", "invalid_sender"));
+      return false;
+    }
+    const options = message.options || {};
+    if (!["use", "save_destination", "destination_settings", "preview_sensitive", "confirm_sensitive"].includes(options.action || "use")) {
+      sendResponse(contextResponse("error", "invalid_context"));
+      return false;
+    }
+    useReweave(sendResponse, options);
     return true;
   }
   if (message?.type === "reweave:reminder-pending") {

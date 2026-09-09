@@ -9,6 +9,7 @@ import reweave.context_extraction
 import reweave.llm_profiles
 import reweave.web
 from reweave.archive import ArchiveStore
+from reweave.context_chunking import AnalysisCoverage, PartialAnalysisError
 from reweave.context_extraction import (
     CONTEXT_EXTRACTION_PROMPT_VERSION,
     ContextExtractionResult,
@@ -80,6 +81,11 @@ def _seed_analysis_queue(db_path, fixtures_dir, *, analysis_mode="project"):
         source_fingerprint=conversation_source_fingerprint(archive, conversation_id),
         analysis_mode=analysis_mode,
     )
+    with context._connect() as conn:
+        conn.execute(
+            "UPDATE context_analysis_queue SET created_at='2026-01-01T00:00:00+00:00' WHERE id=?",
+            (job.id,),
+        )
     return conversation_id, job
 
 
@@ -114,6 +120,59 @@ def _provider_response():
     }
 
 
+@pytest.mark.parametrize(
+    ("reason", "status", "code"),
+    [
+        ("invocation_limit", "pending", "analysis_partial"),
+        ("allowance", "pending", "analysis_limit"),
+        ("total_call_limit", "failed", "analysis_failed"),
+    ],
+)
+def test_partial_analysis_preserves_pending_or_hard_stop(
+    monkeypatch,
+    tmp_path,
+    fixtures_dir,
+    reason,
+    status,
+    code,
+):
+    db_path = tmp_path / "archive.db"
+    source, queued = _seed_analysis_queue(db_path, fixtures_dir)
+    coverage = AnalysisCoverage(
+        "synthetic-run",
+        3,
+        9000,
+        3,
+        1,
+        1,
+        3000,
+        0,
+        1,
+        False,
+        reason,
+    )
+
+    def partial(*args, **kwargs):
+        raise PartialAnalysisError(reason, coverage)
+
+    monkeypatch.setattr(reweave.web, "extract_context_from_conversation", partial)
+    with TestClient(create_app(db_path, data_dir=tmp_path / "app-data")) as client:
+        response = client.post(
+            f"/api/context/analysis/queue/{queued.id}/retry",
+            json={"settings": {"provider": "openai", "model": "synthetic", "api_key": "test"}},
+        )
+        assert response.status_code == 202
+        result = _wait_for_queue_condition(
+            client,
+            queued.id,
+            lambda job: job["status"] == status,
+        )
+        assert result["last_error_code"] == code
+        assert bool(result["next_retry_at"]) == (status == "pending")
+        assert client.get(f"/api/conversations/{source}").status_code == 200
+        assert client.get("/api/context/briefs").json()["results"] == []
+
+
 def _fake_keyring(monkeypatch):
     secrets = {}
     monkeypatch.setattr(
@@ -142,6 +201,8 @@ def _save_fake_extraction(
     settings,
     analysis_mode,
     provider,
+    personal_instructions="",
+    analysis_generation=0,
 ):
     brief = context_store.save_brief(
         conversation_id=conversation_id,
@@ -184,7 +245,7 @@ def test_context_analysis_job_reuses_results_and_exposes_durable_source_linked_r
     db_path = tmp_path / "archive.db"
     _, conversation_id = _seed_archive(db_path, fixtures_dir)
     provider = FakeJsonProvider(_provider_response())
-    monkeypatch.setattr(reweave.context_extraction, "create_provider", lambda settings: provider)
+    monkeypatch.setattr(reweave.web, "create_provider", lambda settings: provider)
     client = TestClient(create_app(db_path, data_dir=tmp_path / "app-data"))
 
     response = client.post("/api/context/analysis/jobs", json=_analysis_request(conversation_id))
@@ -272,6 +333,8 @@ def test_context_analysis_job_uses_saved_profile_credentials(monkeypatch, tmp_pa
         settings,
         analysis_mode,
         provider,
+        personal_instructions="",
+        analysis_generation=0,
     ):
         captured.update(settings=settings, provider=provider)
         brief = context_store.save_brief(
@@ -308,7 +371,7 @@ def test_context_analysis_job_uses_saved_profile_credentials(monkeypatch, tmp_pa
     assert job["status"] == "completed"
     assert captured["settings"].provider == "openai"
     assert captured["settings"].model == "profile-model"
-    assert captured["provider"].credentials[0].api_key == "profile-secret"
+    assert captured["provider"].provider.credentials[0].api_key == "profile-secret"
     assert "profile-secret" not in str(job)
 
 
@@ -318,7 +381,7 @@ def test_context_analysis_api_reports_terminal_failures_and_not_found_resources(
     db_path = tmp_path / "archive.db"
     _, conversation_id = _seed_archive(db_path, fixtures_dir)
     provider = FakeJsonProvider(error=ProviderRequestError("Model rejected request."))
-    monkeypatch.setattr(reweave.context_extraction, "create_provider", lambda settings: provider)
+    monkeypatch.setattr(reweave.web, "create_provider", lambda settings: provider)
     client = TestClient(create_app(db_path, data_dir=tmp_path / "app-data"))
 
     response = client.post("/api/context/analysis/jobs", json=_analysis_request(conversation_id))
@@ -352,7 +415,7 @@ def test_durable_queue_retry_completes_idempotent_extraction_without_storing_key
     db_path = tmp_path / "archive.db"
     _, queued = _seed_analysis_queue(db_path, fixtures_dir)
     provider = FakeJsonProvider(_provider_response())
-    monkeypatch.setattr(reweave.context_extraction, "create_provider", lambda settings: provider)
+    monkeypatch.setattr(reweave.web, "create_provider", lambda settings: provider)
     client = TestClient(create_app(db_path, data_dir=tmp_path / "app-data"))
 
     response = client.post(
@@ -389,7 +452,7 @@ def test_durable_queue_preserves_sanitized_provider_failure_across_restart_and_r
     db_path = tmp_path / "archive.db"
     _, queued = _seed_analysis_queue(db_path, fixtures_dir)
     failing = FakeJsonProvider(error=ProviderRequestError("secret-bearing provider detail"))
-    monkeypatch.setattr(reweave.context_extraction, "create_provider", lambda settings: failing)
+    monkeypatch.setattr(reweave.web, "create_provider", lambda settings: failing)
     data_dir = tmp_path / "app-data"
     client = TestClient(create_app(db_path, data_dir=data_dir))
 
@@ -408,7 +471,7 @@ def test_durable_queue_preserves_sanitized_provider_failure_across_restart_and_r
     restarted = TestClient(create_app(db_path, data_dir=data_dir))
     assert restarted.get(f"/api/context/analysis/queue/{queued.id}").json() == failed
     succeeding = FakeJsonProvider(_provider_response())
-    monkeypatch.setattr(reweave.context_extraction, "create_provider", lambda settings: succeeding)
+    monkeypatch.setattr(reweave.web, "create_provider", lambda settings: succeeding)
     retry_response = restarted.post(
         f"/api/context/analysis/queue/{queued.id}/retry",
         json={"settings": {"api_key": "second-secret", "model": "test-model"}},
@@ -420,21 +483,18 @@ def test_durable_queue_preserves_sanitized_provider_failure_across_restart_and_r
     assert completed["last_error_code"] is None
 
 
-def test_durable_queue_missing_key_failure_remains_readable_and_retryable(
-    tmp_path, fixtures_dir
-):
+def test_durable_queue_missing_key_failure_remains_readable_and_retryable(tmp_path, fixtures_dir):
     db_path = tmp_path / "archive.db"
     _, queued = _seed_analysis_queue(db_path, fixtures_dir, analysis_mode="auto")
     client = TestClient(create_app(db_path, data_dir=tmp_path / "app-data"))
 
     response = client.post(f"/api/context/analysis/queue/{queued.id}/retry", json={})
 
-    assert response.status_code == 202
-    failed = _wait_for_queue_job(client, queued.id)
-    assert failed["status"] == "failed"
-    assert failed["last_error_code"] == "provider_configuration"
-    assert failed["last_error_summary"] == "A connected provider is required for analysis."
-    assert failed["result_brief_id"] is None
+    assert response.status_code == 400
+    pending = client.get(f"/api/context/analysis/queue/{queued.id}").json()
+    assert pending["status"] == "pending"
+    assert pending["attempt_count"] == 0
+    assert pending["result_brief_id"] is None
 
 
 def test_durable_queue_retry_uses_current_saved_profile_without_persisting_secret(
@@ -478,6 +538,8 @@ def test_durable_queue_retry_uses_current_saved_profile_without_persisting_secre
         settings,
         analysis_mode,
         provider,
+        personal_instructions="",
+        analysis_generation=0,
     ):
         captured.update(settings=settings, provider=provider)
         brief = context_store.save_brief(
@@ -510,7 +572,7 @@ def test_durable_queue_retry_uses_current_saved_profile_without_persisting_secre
     assert response.status_code == 202
     assert completed["status"] == "complete"
     assert captured["settings"].provider == "openai"
-    assert captured["provider"].credentials[0].api_key == "queue-profile-secret"
+    assert captured["provider"].provider.credentials[0].api_key == "queue-profile-secret"
     assert "queue-profile-secret" not in str(completed)
     assert b"queue-profile-secret" not in db_path.read_bytes()
 
@@ -543,6 +605,8 @@ def test_scheduler_processes_pending_work_on_startup_with_local_estimates(
         settings,
         analysis_mode,
         provider,
+        personal_instructions="",
+        analysis_generation=0,
     ):
         running = context_store.list_analysis_queue_jobs(status="running")[0]
         observed["characters"] = running.estimated_input_characters
@@ -671,6 +735,8 @@ def test_automatic_scheduler_applies_bounded_backoff_and_retries_due_work(
         settings,
         analysis_mode,
         provider,
+        personal_instructions="",
+        analysis_generation=0,
     ):
         attempts.append(conversation_id)
         if len(attempts) == 1:

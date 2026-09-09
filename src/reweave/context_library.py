@@ -5,13 +5,19 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
+from threading import local
 from typing import Literal
+from unicodedata import normalize
 from uuid import uuid4
 
 from reweave.archive import ArchiveStore
+
+CONTEXT_SCHEMA_VERSION = 7
 
 AnalysisMode = Literal["auto", "project", "learning", "research_writing", "context_handoff"]
 ContextItemType = Literal[
@@ -78,6 +84,27 @@ class ContextScope:
     scope_key: str
     confidence: float
     created_at: str
+    space_id: str = ""
+
+
+@dataclass(frozen=True)
+class ContextSpace:
+    id: str
+    scope_type: str
+    name: str
+    aliases: tuple[str, ...]
+    revision: int
+    corrected: bool
+    merged_into: str | None
+    created_at: str
+    updated_at: str
+
+
+class ContextRevisionConflictError(ValueError):
+    """The stored revision changed after the user opened an editor."""
+
+
+ContextRevisionConflict = ContextRevisionConflictError
 
 
 @dataclass(frozen=True)
@@ -97,6 +124,7 @@ class ContextEvidence:
     excerpt: str
     relationship: str
     created_at: str
+    source_changed: bool = False
 
 
 @dataclass(frozen=True)
@@ -113,6 +141,10 @@ class ContextItemVersion:
     stale_at: str | None
     change_reason: str
     created_at: str
+    inference_rationale: str = ""
+    authority: str = "extraction"
+    scopes: tuple[ScopeInput, ...] = ()
+    evidence_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -141,6 +173,32 @@ class ContextItem:
     evidence: tuple[ContextEvidence, ...]
     versions: tuple[ContextItemVersion, ...]
     links: tuple[ContextItemLink, ...]
+    inference_rationale: str = ""
+    authority: str = "extraction"
+
+
+@dataclass(frozen=True)
+class SemanticMatchInput:
+    matching_item_id: str
+    matching_item_version: int
+    relationship: str
+    confidence: float
+    rationale: str
+    evidence_excerpt: str
+
+
+@dataclass(frozen=True)
+class ContextItemInput:
+    canonical_text: str
+    item_type: str
+    epistemic_kind: str
+    confidence: float
+    sensitivity: str
+    scopes: tuple[ScopeInput, ...]
+    evidence: tuple[EvidenceInput, ...]
+    last_confirmed_at: str | None = None
+    inference_rationale: str = ""
+    semantic_match: SemanticMatchInput | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +227,7 @@ class ConversationBrief:
     created_at: str
     updated_at: str
     context_item_ids: tuple[str, ...]
+    analysis_generation: int = 0
 
 
 @dataclass(frozen=True)
@@ -190,6 +249,7 @@ class ContextAnalysisQueueJob:
     updated_at: str
     last_attempt_at: str | None
     completed_at: str | None
+    analysis_generation: int = 0
 
 
 class ContextLibraryStore:
@@ -197,6 +257,7 @@ class ContextLibraryStore:
 
     def __init__(self, db_path: Path):
         self.db_path = db_path
+        self._transaction_state = local()
         ArchiveStore(db_path)
         self._ensure_schema()
 
@@ -218,9 +279,12 @@ class ContextLibraryStore:
         analysis_model: str,
         analysis_status: str = "complete",
         source_fingerprint: str = "",
+        analysis_generation: int = 0,
     ) -> ConversationBrief:
         """Create or update one analysis-versioned brief for an archived conversation."""
         _require_choice("analysis mode", analysis_mode, ANALYSIS_MODES)
+        if type(analysis_generation) is not int or analysis_generation < 0:
+            raise ValueError("Analysis generation must be a non-negative integer.")
         subject = _require_text("main subject", main_subject, 4_000)
         goal = _require_text("user goal", user_goal, 4_000)
         version = _require_text("analysis version", analysis_version, 200)
@@ -301,6 +365,10 @@ class ContextLibraryStore:
                     """,
                     (*values, brief_id),
                 )
+            conn.execute(
+                "UPDATE conversation_briefs SET analysis_generation=? WHERE id=?",
+                (analysis_generation, brief_id),
+            )
 
         brief = self.get_brief(brief_id)
         if brief is None:  # pragma: no cover - guarded by the transaction above.
@@ -337,7 +405,7 @@ class ContextLibraryStore:
         return brief
 
     def reset_brief_items(self, brief_id: str) -> None:
-        """Remove one Brief's item links and delete items left without any Brief."""
+        """Detach Brief links without destroying independently retained Library history."""
         with self._connect() as conn:
             if (
                 conn.execute(
@@ -346,19 +414,7 @@ class ContextLibraryStore:
                 is None
             ):
                 raise LookupError("Conversation Brief not found.")
-            item_ids = [
-                row["item_id"]
-                for row in conn.execute(
-                    "SELECT item_id FROM brief_context_items WHERE brief_id = ?", (brief_id,)
-                ).fetchall()
-            ]
             conn.execute("DELETE FROM brief_context_items WHERE brief_id = ?", (brief_id,))
-            for item_id in item_ids:
-                remaining = conn.execute(
-                    "SELECT 1 FROM brief_context_items WHERE item_id = ? LIMIT 1", (item_id,)
-                ).fetchone()
-                if remaining is None:
-                    conn.execute("DELETE FROM context_items WHERE id = ?", (item_id,))
 
     def get_brief_for_analysis(
         self, source_record_id: str, analysis_version: str
@@ -376,12 +432,12 @@ class ContextLibraryStore:
                 return None
             return self._row_to_brief(conn, row)
 
-    def list_briefs(self, *, limit: int = 100) -> list[ConversationBrief]:
+    def list_briefs(self, *, limit: int = 100, offset: int = 0) -> list[ConversationBrief]:
         """Return Conversation Briefs newest first."""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM conversation_briefs ORDER BY updated_at DESC, id LIMIT ?",
-                (min(max(limit, 1), 500),),
+                "SELECT * FROM conversation_briefs ORDER BY updated_at DESC, id LIMIT ? OFFSET ?",
+                (min(max(limit, 1), 500), max(0, offset)),
             ).fetchall()
             return [self._row_to_brief(conn, row) for row in rows]
 
@@ -444,6 +500,26 @@ class ContextLibraryStore:
                 "SELECT * FROM context_analysis_queue WHERE id = ?", (job_id,)
             ).fetchone()
             return self._row_to_analysis_queue_job(row) if row is not None else None
+
+    def requeue_analysis(self, job_id: str, *, analysis_mode: str) -> ContextAnalysisQueueJob:
+        """Explicitly requeue a source while keeping automatic capture idempotent."""
+        _require_choice("analysis mode", analysis_mode, ANALYSIS_MODES)
+        with self.transaction(), self._connect() as conn:
+            job = self.get_analysis_queue_job(job_id)
+            if job is None:
+                raise LookupError("Context analysis queue job not found.")
+            if job.status in {"running", "superseded"}:
+                raise ContextRevisionConflict(
+                    "This analysis is running or superseded; reload its source."
+                )
+            conn.execute(
+                "UPDATE context_analysis_queue SET status = 'pending', analysis_mode = ?, "
+                "analysis_generation = analysis_generation + 1, "
+                "last_error_code = NULL, last_error_summary = NULL, next_retry_at = NULL, "
+                "result_brief_id = NULL, completed_at = NULL, updated_at = ? WHERE id = ?",
+                (analysis_mode, _now(), job_id),
+            )
+        return self._require_analysis_queue_job(job_id)
 
     def list_analysis_queue_jobs(
         self,
@@ -533,9 +609,12 @@ class ContextLibraryStore:
                 (now, now, job_id),
             )
             if result.rowcount == 0:
-                if conn.execute(
-                    "SELECT 1 FROM context_analysis_queue WHERE id = ?", (job_id,)
-                ).fetchone() is None:
+                if (
+                    conn.execute(
+                        "SELECT 1 FROM context_analysis_queue WHERE id = ?", (job_id,)
+                    ).fetchone()
+                    is None
+                ):
                     raise LookupError("Context analysis queue job not found.")
                 raise ValueError("Context analysis queue job is not retryable.")
         return self._require_analysis_queue_job(job_id)
@@ -561,9 +640,12 @@ class ContextLibraryStore:
                 (characters, tokens, now, job_id),
             )
             if result.rowcount == 0:
-                if conn.execute(
-                    "SELECT 1 FROM context_analysis_queue WHERE id = ?", (job_id,)
-                ).fetchone() is None:
+                if (
+                    conn.execute(
+                        "SELECT 1 FROM context_analysis_queue WHERE id = ?", (job_id,)
+                    ).fetchone()
+                    is None
+                ):
                     raise LookupError("Context analysis queue job not found.")
                 raise ValueError("Context analysis queue job is not running.")
         return self._require_analysis_queue_job(job_id)
@@ -625,9 +707,12 @@ class ContextLibraryStore:
                 (code, summary, retry_at, now, job_id),
             )
             if result.rowcount == 0:
-                if conn.execute(
-                    "SELECT 1 FROM context_analysis_queue WHERE id = ?", (job_id,)
-                ).fetchone() is None:
+                if (
+                    conn.execute(
+                        "SELECT 1 FROM context_analysis_queue WHERE id = ?", (job_id,)
+                    ).fetchone()
+                    is None
+                ):
                     raise LookupError("Context analysis queue job not found.")
                 raise ValueError("Context analysis queue job is not running.")
         return self._require_analysis_queue_job(job_id)
@@ -684,9 +769,12 @@ class ContextLibraryStore:
                 ),
             )
             if result.rowcount == 0:
-                if conn.execute(
-                    "SELECT 1 FROM context_analysis_queue WHERE id = ?", (job_id,)
-                ).fetchone() is None:
+                if (
+                    conn.execute(
+                        "SELECT 1 FROM context_analysis_queue WHERE id = ?", (job_id,)
+                    ).fetchone()
+                    is None
+                ):
                     raise LookupError("Context analysis queue job not found.")
                 raise ValueError("Context analysis queue job is not running.")
         return self._require_analysis_queue_job(job_id)
@@ -706,6 +794,7 @@ class ContextLibraryStore:
         last_confirmed_at: str | None = None,
         stale_at: str | None = None,
         item_id: str | None = None,
+        inference_rationale: str = "",
     ) -> ContextItem:
         """Create one source-linked Context Item and its initial immutable version."""
         text = _require_text("canonical text", canonical_text, 12_000)
@@ -715,6 +804,7 @@ class ContextLibraryStore:
         _require_choice("status", status, CONTEXT_STATUSES)
         score = _require_confidence(confidence)
         normalized_scopes = _normalize_scopes(scopes)
+        normalized_scopes = _safe_scopes(normalized_scopes, sensitivity)
         if not normalized_scopes:
             raise ValueError("Add at least one Context scope.")
         if not evidence:
@@ -824,6 +914,30 @@ class ContextLibraryStore:
                         now,
                     ),
                 )
+            conn.execute(
+                "UPDATE context_items SET inference_rationale = ? WHERE id = ?",
+                (inference_rationale.strip()[:4000], context_item_id),
+            )
+            self._canonicalize_item_scopes(conn, context_item_id)
+            self._snapshot_version(conn, context_item_id)
+            initial_input = ContextItemInput(
+                text,
+                item_type,
+                epistemic_kind,
+                score,
+                sensitivity,
+                normalized_scopes,
+                tuple(evidence),
+                last_confirmed_at,
+                inference_rationale,
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO context_extraction_identities VALUES (?, ?)",
+                (
+                    self._extraction_identity(conn, initial_input, normalized_scopes),
+                    context_item_id,
+                ),
+            )
 
         item = self.get_item(context_item_id)
         if item is None:  # pragma: no cover - guarded by the transaction above.
@@ -838,7 +952,7 @@ class ContextLibraryStore:
                 return None
             return self._row_to_item(conn, row)
 
-    def list_items(self, *, limit: int | None = 200) -> list[ContextItem]:
+    def list_items(self, *, limit: int | None = 200, offset: int = 0) -> list[ContextItem]:
         """Return current Context Items newest first, or the full library when unbounded."""
         with self._connect() as conn:
             if limit is None:
@@ -847,10 +961,18 @@ class ContextLibraryStore:
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM context_items ORDER BY updated_at DESC, id LIMIT ?",
-                    (min(max(limit, 1), 1_000),),
+                    "SELECT * FROM context_items ORDER BY updated_at DESC, id LIMIT ? OFFSET ?",
+                    (min(max(limit, 1), 1_000), max(0, offset)),
                 ).fetchall()
             return [self._row_to_item(conn, row) for row in rows]
+
+    def count_items(self) -> int:
+        with self._connect() as conn:
+            return conn.execute("SELECT COUNT(*) FROM context_items").fetchone()[0]
+
+    def count_briefs(self) -> int:
+        with self._connect() as conn:
+            return conn.execute("SELECT COUNT(*) FROM conversation_briefs").fetchone()[0]
 
     def revise_item(
         self,
@@ -865,16 +987,29 @@ class ContextLibraryStore:
         status: str | None = None,
         last_confirmed_at: str | None = None,
         stale_at: str | None = None,
+        scopes: Sequence[ScopeInput] | None = None,
+        inference_rationale: str | None = None,
+        authority: str = "user",
+        expected_version: int | None = None,
     ) -> ContextItem:
         """Revise a Context Item while preserving an immutable version history."""
         reason = _require_text("change reason", change_reason, 2_000)
+        _require_choice("change authority", authority, {"extraction", "user", "system"})
         now = _now()
         with self._connect() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             current = conn.execute(
                 "SELECT * FROM context_items WHERE id = ?", (item_id,)
             ).fetchone()
             if current is None:
                 raise LookupError("Context Item not found.")
+            if expected_version is not None and current["current_version"] != expected_version:
+                raise ContextRevisionConflict("Context Item changed; reload before editing.")
+            if current["authority"] == "user" and authority == "extraction":
+                raise ContextRevisionConflict(
+                    "An explicit correction takes precedence over analysis."
+                )
             next_text = (
                 current["canonical_text"]
                 if canonical_text is None
@@ -896,6 +1031,8 @@ class ContextLibraryStore:
             next_version = int(current["current_version"]) + 1
             next_confirmed = last_confirmed_at or current["last_confirmed_at"]
             next_stale = stale_at if stale_at is not None else current["stale_at"]
+            if next_status == "active" and current["status"] == "stale" and stale_at is None:
+                next_stale = None
 
             conn.execute(
                 """
@@ -919,6 +1056,31 @@ class ContextLibraryStore:
                     item_id,
                 ),
             )
+            next_rationale = (
+                current["inference_rationale"]
+                if inference_rationale is None
+                else inference_rationale.strip()[:4000]
+            )
+            next_authority = "user" if current["authority"] == "user" else authority
+            conn.execute(
+                "UPDATE context_items SET authority = ?, inference_rationale = ? WHERE id = ?",
+                (next_authority, next_rationale, item_id),
+            )
+            if scopes is not None or next_sensitivity == "sensitive":
+                next_scopes = (
+                    _normalize_scopes(scopes)
+                    if scopes is not None
+                    else tuple(
+                        ScopeInput(row["scope_type"], row["scope_key"], row["confidence"])
+                        for row in conn.execute(
+                            "SELECT * FROM context_item_scopes WHERE item_id = ?", (item_id,)
+                        )
+                    )
+                )
+                next_scopes = _safe_scopes(next_scopes, next_sensitivity)
+                if not next_scopes:
+                    raise ValueError("Add at least one Context scope.")
+                self._replace_scopes(conn, item_id, next_scopes)
             conn.execute(
                 """
                 INSERT INTO context_item_versions (
@@ -942,6 +1104,7 @@ class ContextLibraryStore:
                     now,
                 ),
             )
+            self._snapshot_version(conn, item_id)
 
         revised = self.get_item(item_id)
         if revised is None:  # pragma: no cover
@@ -971,6 +1134,629 @@ class ContextLibraryStore:
                 """,
                 (source_item_id, target_item_id, relation, now),
             )
+
+    @contextmanager
+    def transaction(self):
+        """Commit a complete extraction once; nested store calls share its connection."""
+        if getattr(self._transaction_state, "connection", None) is not None:
+            yield
+            return
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._transaction_state.connection = conn
+            try:
+                yield
+            finally:
+                self._transaction_state.connection = None
+
+    def reconcile_brief_items(
+        self, brief_id: str, items: Sequence[ContextItemInput]
+    ) -> tuple[ContextItem, ...]:
+        """Attach exact compatible matches, retain corrections, and preserve changed history."""
+        with self.transaction(), self._connect() as conn:
+            brief = self.get_brief(brief_id)
+            if brief is None:
+                raise LookupError("Conversation Brief not found.")
+            previous_ids = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT bi.item_id FROM brief_context_items bi JOIN conversation_briefs b "
+                    "ON b.id = bi.brief_id WHERE b.source_record_id = ? AND b.analysis_mode = ?",
+                    (brief.source_record_id, brief.analysis_mode),
+                )
+            }
+            result_ids: list[str] = []
+            semantic_events = []
+            for candidate in items:
+                scopes = self._resolve_scopes(
+                    conn, _safe_scopes(_normalize_scopes(candidate.scopes), candidate.sensitivity)
+                )
+                identity = self._extraction_identity(conn, candidate, scopes)
+                match = conn.execute(
+                    "SELECT i.* FROM context_extraction_identities k "
+                    "JOIN context_items i ON i.id = k.item_id WHERE k.identity = ?",
+                    (identity,),
+                ).fetchone()
+                if match is not None and not (
+                    self._current_extraction_routes_match(conn, match, candidate, scopes)
+                    or self._same_source_user_correction(conn, match, brief.source_record_id)
+                ):
+                    # Historical identity remembers the original source's correction, but
+                    # cannot import a different source into the corrected private scope.
+                    match = None
+                semantic_target = self._validated_semantic_match(conn, candidate, scopes)
+                if (
+                    match is None
+                    and semantic_target is not None
+                    and candidate.semantic_match.relationship == "same_meaning"
+                    and candidate.semantic_match.confidence >= 0.95
+                ):
+                    match = semantic_target
+                if match is None or not self._same_source_user_correction(
+                    conn, match, brief.source_record_id
+                ):
+                    # Legacy items had no extraction identity. Match exact text and all routes.
+                    # A source's own correction takes precedence over a global identity that
+                    # another source may have populated after an older migration.
+                    for row in conn.execute(
+                        "SELECT DISTINCT i.*, EXISTS(SELECT 1 FROM context_evidence e "
+                        "WHERE e.item_id=i.id AND e.source_record_id=?) AS source_associated "
+                        "FROM context_items i JOIN context_item_versions v "
+                        "ON v.item_id = i.id WHERE v.item_type = ? AND v.epistemic_kind = ? "
+                        "AND v.extraction_text_key = ? "
+                        "AND (?=0 OR (i.authority='user' AND EXISTS(SELECT 1 "
+                        "FROM context_evidence e WHERE e.item_id=i.id AND e.source_record_id=?))) "
+                        "ORDER BY source_associated DESC, i.authority DESC",
+                        (
+                            brief.source_record_id,
+                            candidate.item_type,
+                            candidate.epistemic_kind,
+                            _identity_text(candidate.canonical_text),
+                            int(match is not None),
+                            brief.source_record_id,
+                        ),
+                    ).fetchall():
+                        versions = conn.execute(
+                            "SELECT * FROM context_item_versions WHERE item_id = ?", (row["id"],)
+                        ).fetchall()
+                        if not any(
+                            _identity_text(v["canonical_text"])
+                            == _identity_text(candidate.canonical_text)
+                            for v in versions
+                        ):
+                            continue
+                        candidate_routes = {
+                            (s.scope_type, _identity_text(s.scope_key)) for s in scopes
+                        }
+                        historical_routes_match = self._same_source_user_correction(
+                            conn, row, brief.source_record_id
+                        ) and any(
+                            _identity_text(version["canonical_text"])
+                            == _identity_text(candidate.canonical_text)
+                            and {
+                                (scope.scope_type, _identity_text(scope.scope_key))
+                                for scope in self._resolve_scopes(
+                                    conn,
+                                    tuple(
+                                        ScopeInput(**value)
+                                        for value in json.loads(version["scopes_json"])
+                                    ),
+                                )
+                            }
+                            == candidate_routes
+                            for version in versions
+                        )
+                        if (
+                            self._current_extraction_routes_match(conn, row, candidate, scopes)
+                            or historical_routes_match
+                        ):
+                            match = row
+                            break
+                if match is None:
+                    item = self.create_item(
+                        brief_id=brief_id,
+                        canonical_text=candidate.canonical_text,
+                        item_type=candidate.item_type,
+                        epistemic_kind=candidate.epistemic_kind,
+                        confidence=candidate.confidence,
+                        sensitivity=candidate.sensitivity,
+                        scopes=scopes,
+                        evidence=candidate.evidence,
+                        last_confirmed_at=candidate.last_confirmed_at,
+                        inference_rationale=candidate.inference_rationale,
+                    )
+                    item_id = item.id
+                else:
+                    item_id = match["id"]
+                    added = self._attach_evidence(conn, item_id, candidate.evidence)
+                    reactivate = match["status"] == "stale" and match["authority"] != "user"
+                    escalate = (
+                        candidate.sensitivity == "sensitive" and match["sensitivity"] != "sensitive"
+                    )
+                    if added or reactivate or escalate:
+                        # Evidence additions get their own version without changing a correction.
+                        self.revise_item(
+                            item_id,
+                            change_reason="Additional supporting source attached",
+                            authority="system",
+                            expected_version=match["current_version"],
+                            sensitivity=(
+                                "sensitive"
+                                if candidate.sensitivity == "sensitive"
+                                else match["sensitivity"]
+                            ),
+                            status="active" if reactivate else match["status"],
+                            last_confirmed_at=max(
+                                filter(
+                                    None, [match["last_confirmed_at"], candidate.last_confirmed_at]
+                                ),
+                                default=None,
+                            ),
+                        )
+                    conn.execute(
+                        "INSERT OR IGNORE INTO brief_context_items VALUES (?, ?, ?)",
+                        (brief_id, item_id, _now()),
+                    )
+                conn.execute(
+                    "INSERT OR IGNORE INTO context_extraction_identities VALUES (?, ?)",
+                    (identity, item_id),
+                )
+                if item_id not in result_ids:
+                    result_ids.append(item_id)
+                if semantic_target is not None:
+                    semantic_events.append((item_id, semantic_target, candidate.semantic_match))
+            for old_id in previous_ids - set(result_ids):
+                old = self.get_item(old_id)
+                conn.execute(
+                    "DELETE FROM brief_context_items WHERE brief_id = ? AND item_id = ?",
+                    (brief_id, old_id),
+                )
+                has_other_source = conn.execute(
+                    "SELECT 1 FROM brief_context_items bi JOIN conversation_briefs b "
+                    "ON b.id = bi.brief_id WHERE bi.item_id = ? "
+                    "AND b.source_record_id <> ? LIMIT 1",
+                    (old_id, brief.source_record_id),
+                ).fetchone()
+                if (
+                    old
+                    and old.authority != "user"
+                    and not has_other_source
+                    and old.status == "active"
+                ):
+                    self.revise_item(
+                        old_id,
+                        change_reason="Source reanalysis no longer extracts this item",
+                        status="stale",
+                        stale_at=_now(),
+                        authority="system",
+                        expected_version=old.current_version,
+                    )
+                if old:
+                    old_evidence = {e.source_message_record_id for e in old.evidence}
+                    for new_id in result_ids:
+                        new = self.get_item(new_id)
+                        if (
+                            new
+                            and old.item_type == new.item_type
+                            and old_evidence.intersection(
+                                e.source_message_record_id for e in new.evidence
+                            )
+                        ):
+                            self.link_items(old_id, new_id, "source_update")
+            self._link_shared_evidence(conn, result_ids)
+            for item_id, target, semantic in semantic_events:
+                self._record_semantic_match(conn, item_id, target, semantic, brief)
+            return tuple(self.get_item(item_id) for item_id in result_ids)
+
+    def _current_extraction_routes_match(self, conn, item, candidate, scopes):
+        if (item["item_type"], item["epistemic_kind"]) != (
+            candidate.item_type,
+            candidate.epistemic_kind,
+        ):
+            return False
+        current_routes = {
+            (row["scope_type"], _identity_text(row["scope_key"]))
+            for row in conn.execute(
+                "SELECT scope_type,scope_key FROM context_item_scopes WHERE item_id=?",
+                (item["id"],),
+            )
+        }
+        return current_routes == {
+            (scope.scope_type, _identity_text(scope.scope_key)) for scope in scopes
+        }
+
+    def _same_source_user_correction(self, conn, item, source_record_id):
+        return (
+            item["authority"] == "user"
+            and conn.execute(
+                "SELECT 1 FROM context_evidence WHERE item_id=? AND source_record_id=? LIMIT 1",
+                (item["id"], source_record_id),
+            ).fetchone()
+            is not None
+        )
+
+    def _validated_semantic_match(self, conn, candidate, scopes):
+        match = candidate.semantic_match
+        if match is None or match.relationship not in {"same_meaning", "expands", "contradicts"}:
+            return None
+        if not match.rationale.strip() or not 0 < match.confidence <= 1:
+            return None
+        if not match.evidence_excerpt or not any(
+            match.evidence_excerpt in evidence.excerpt for evidence in candidate.evidence
+        ):
+            return None
+        target = conn.execute(
+            "SELECT * FROM context_items WHERE id=? AND current_version=? AND sensitivity='normal' "
+            "AND status='active' AND item_type=? AND epistemic_kind=?",
+            (
+                match.matching_item_id,
+                match.matching_item_version,
+                candidate.item_type,
+                candidate.epistemic_kind,
+            ),
+        ).fetchone()
+        if target is None or candidate.sensitivity != "normal":
+            return None
+        target_routes = {
+            (row[0], _identity_text(row[1]))
+            for row in conn.execute(
+                "SELECT scope_type, scope_key FROM context_item_scopes WHERE item_id=?",
+                (target["id"],),
+            )
+        }
+        candidate_routes = {(scope.scope_type, _identity_text(scope.scope_key)) for scope in scopes}
+        return target if target_routes == candidate_routes else None
+
+    def _record_semantic_match(self, conn, item_id, target, semantic, brief):
+        version = conn.execute(
+            "SELECT current_version FROM context_items WHERE id=?",
+            (item_id,),
+        ).fetchone()[0]
+        relationship = semantic.relationship
+        if item_id != target["id"]:
+            threshold = 0.95 if relationship == "same_meaning" else 0.85
+            relationship = (
+                {
+                    "same_meaning": "possible_duplicate",
+                    "expands": "possible_expansion",
+                    "contradicts": "possible_contradiction",
+                }[relationship]
+                if semantic.confidence < threshold
+                else relationship
+            )
+            self.link_items(item_id, target["id"], relationship)
+        conn.execute(
+            "INSERT OR IGNORE INTO context_semantic_matches "
+            "(id,source_item_id,source_version,target_item_id,target_version,source_record_id,"
+            "relationship,confidence,rationale,evidence_excerpt,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                uuid4().hex,
+                item_id,
+                version,
+                target["id"],
+                target["current_version"],
+                brief.source_record_id,
+                relationship,
+                semantic.confidence,
+                semantic.rationale[:1000],
+                semantic.evidence_excerpt[:1200],
+                _now(),
+            ),
+        )
+
+    def list_semantic_matches(self, item_id: str) -> list[dict]:
+        """Return versioned matching rationale locally, without exposing source message history."""
+        with self._connect() as conn:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    "SELECT * FROM context_semantic_matches "
+                    "WHERE source_item_id=? OR target_item_id=? "
+                    "ORDER BY created_at DESC, id DESC LIMIT 100",
+                    (item_id, item_id),
+                )
+            ]
+
+    def undo_item(self, item_id: str, *, version: int, expected_version: int) -> ContextItem:
+        """Restore a historical item and scopes as a new explicit correction."""
+        with self.transaction():
+            item = self.get_item(item_id)
+            if item is None:
+                raise LookupError("Context Item not found.")
+            previous = next((entry for entry in item.versions if entry.version == version), None)
+            if previous is None:
+                raise LookupError("Context Item version not found.")
+            if not previous.scopes:
+                raise ValueError(
+                    "This legacy version predates scope history; correct its scopes explicitly."
+                )
+            self.revise_item(
+                item_id,
+                expected_version=expected_version,
+                change_reason=f"Restored version {version}",
+                canonical_text=previous.canonical_text,
+                item_type=previous.item_type,
+                epistemic_kind=previous.epistemic_kind,
+                confidence=previous.confidence,
+                sensitivity=previous.sensitivity,
+                status=previous.status,
+                scopes=previous.scopes,
+                inference_rationale=previous.inference_rationale,
+                authority="user",
+            )
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE context_items SET last_confirmed_at = ?, stale_at = ? WHERE id = ?",
+                    (previous.last_confirmed_at, previous.stale_at, item_id),
+                )
+                conn.execute(
+                    "UPDATE context_item_versions SET last_confirmed_at = ?, stale_at = ? "
+                    "WHERE item_id = ? AND version = ?",
+                    (previous.last_confirmed_at, previous.stale_at, item_id, expected_version + 1),
+                )
+            return self.get_item(item_id)
+
+    def list_spaces(self) -> list[ContextSpace]:
+        with self._connect() as conn:
+            return [
+                self._row_to_space(conn, row)
+                for row in conn.execute(
+                    "SELECT * FROM context_spaces WHERE merged_into IS NULL "
+                    "ORDER BY scope_type, name"
+                )
+            ]
+
+    def get_space(self, space_id: str) -> ContextSpace | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM context_spaces WHERE id = ?", (space_id,)).fetchone()
+            return self._row_to_space(conn, row) if row else None
+
+    def rename_space(self, space_id: str, *, name: str, expected_revision: int) -> ContextSpace:
+        """Remember both old and new names so future extraction uses the corrected space."""
+        name = _require_text("space name", name, 500)
+        with self.transaction(), self._connect() as conn:
+            space = self._require_editable_space(conn, space_id, expected_revision)
+            collision = conn.execute(
+                "SELECT space_id FROM context_space_aliases WHERE scope_type = ? AND alias_key = ?",
+                (space.scope_type, _identity_text(name)),
+            ).fetchone()
+            if collision and collision[0] != space_id:
+                raise ValueError("This name belongs to another space; merge the spaces explicitly.")
+            conn.execute(
+                "INSERT OR IGNORE INTO context_space_aliases VALUES (?, ?, ?, ?)",
+                (space.scope_type, _identity_text(name), name, space_id),
+            )
+            conn.execute(
+                "UPDATE context_spaces SET name = ?, revision = revision + 1, corrected = 1, "
+                "updated_at = ? WHERE id = ?",
+                (name, _now(), space_id),
+            )
+            self._refresh_space_members(conn, space_id, "Space renamed")
+            self._record_space_event(conn, space_id, "rename", space.name, name)
+        return self.get_space(space_id)
+
+    def merge_spaces(
+        self,
+        source_id: str,
+        target_id: str,
+        *,
+        expected_source_revision: int,
+        expected_target_revision: int,
+    ) -> ContextSpace:
+        """Merge named spaces of the same type without broadening a privacy boundary."""
+        if source_id == target_id:
+            raise ValueError("Choose two different spaces.")
+        with self.transaction(), self._connect() as conn:
+            source = self._require_editable_space(conn, source_id, expected_source_revision)
+            target = self._require_editable_space(conn, target_id, expected_target_revision)
+            if source.scope_type != target.scope_type:
+                raise ValueError("Only spaces with the same scope type can be merged.")
+            conn.execute(
+                "UPDATE context_space_aliases SET space_id = ? WHERE space_id = ?",
+                (target_id, source_id),
+            )
+            conn.execute(
+                "UPDATE context_item_scopes SET space_id = ? WHERE space_id = ?",
+                (target_id, source_id),
+            )
+            conn.execute(
+                "UPDATE context_spaces SET merged_into = ?, revision = revision + 1, "
+                "corrected = 1, updated_at = ? WHERE id = ?",
+                (target_id, _now(), source_id),
+            )
+            conn.execute(
+                "UPDATE context_spaces SET revision = revision + 1, corrected = 1, updated_at = ? "
+                "WHERE id = ?",
+                (_now(), target_id),
+            )
+            self._refresh_space_members(conn, target_id, "Spaces merged")
+            self._record_space_event(conn, source_id, "merge", source.name, target_id)
+        return self.get_space(target_id)
+
+    def _require_editable_space(self, conn, space_id, expected_revision):
+        row = conn.execute("SELECT * FROM context_spaces WHERE id = ?", (space_id,)).fetchone()
+        if row is None:
+            raise LookupError("Context space not found.")
+        space = self._row_to_space(conn, row)
+        if space.revision != expected_revision or space.merged_into:
+            raise ContextRevisionConflict("Space changed; reload before editing.")
+        if space.scope_type not in {"project", "topic", "destination"}:
+            raise ValueError("Built-in privacy spaces cannot be renamed or merged.")
+        return space
+
+    def _row_to_space(self, conn, row):
+        return ContextSpace(
+            id=row["id"],
+            scope_type=row["scope_type"],
+            name=row["name"],
+            aliases=tuple(
+                alias[0]
+                for alias in conn.execute(
+                    "SELECT alias FROM context_space_aliases WHERE space_id = ? ORDER BY alias_key",
+                    (row["id"],),
+                )
+            ),
+            revision=row["revision"],
+            corrected=bool(row["corrected"]),
+            merged_into=row["merged_into"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _resolve_space(self, conn, scope):
+        key = _identity_text(scope.scope_key)
+        row = conn.execute(
+            "SELECT s.* FROM context_space_aliases a JOIN context_spaces s ON s.id = a.space_id "
+            "WHERE a.scope_type = ? AND a.alias_key = ?",
+            (scope.scope_type, key),
+        ).fetchone()
+        if row is None:
+            name = (
+                scope.scope_key
+                or {"core_self": "Core Self", "personal": "Personal", "work": "Work"}[
+                    scope.scope_type
+                ]
+            )
+            space_id, now = uuid4().hex, _now()
+            conn.execute(
+                "INSERT INTO context_spaces VALUES (?, ?, ?, 1, 0, NULL, ?, ?)",
+                (space_id, scope.scope_type, name, now, now),
+            )
+            conn.execute(
+                "INSERT INTO context_space_aliases VALUES (?, ?, ?, ?)",
+                (scope.scope_type, key, scope.scope_key, space_id),
+            )
+            row = conn.execute("SELECT * FROM context_spaces WHERE id = ?", (space_id,)).fetchone()
+        return row
+
+    def _resolve_scopes(self, conn, scopes):
+        result = {}
+        for scope in scopes:
+            space = self._resolve_space(conn, scope)
+            key = space["name"] if scope.scope_type in {"project", "topic", "destination"} else ""
+            result[space["id"]] = ScopeInput(scope.scope_type, key, scope.confidence)
+        return tuple(result.values())
+
+    def _replace_scopes(self, conn, item_id, scopes):
+        resolved = self._resolve_scopes(conn, scopes)
+        conn.execute("DELETE FROM context_item_scopes WHERE item_id = ?", (item_id,))
+        for scope in resolved:
+            space = self._resolve_space(conn, scope)
+            conn.execute(
+                "INSERT INTO context_item_scopes "
+                "(item_id, scope_type, scope_key, confidence, created_at, space_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (item_id, scope.scope_type, scope.scope_key, scope.confidence, _now(), space["id"]),
+            )
+
+    def _canonicalize_item_scopes(self, conn, item_id):
+        scopes = [
+            ScopeInput(r["scope_type"], r["scope_key"], r["confidence"])
+            for r in conn.execute("SELECT * FROM context_item_scopes WHERE item_id = ?", (item_id,))
+        ]
+        self._replace_scopes(conn, item_id, scopes)
+
+    def _refresh_space_members(self, conn, space_id, reason):
+        item_ids = [
+            r[0]
+            for r in conn.execute(
+                "SELECT DISTINCT item_id FROM context_item_scopes WHERE space_id = ?", (space_id,)
+            )
+        ]
+        for item_id in item_ids:
+            self._canonicalize_item_scopes(conn, item_id)
+            self.revise_item(item_id, change_reason=reason, authority="system")
+
+    def _record_space_event(self, conn, space_id, action, before, after):
+        conn.execute(
+            "INSERT INTO context_space_events VALUES (?, ?, ?, ?, ?, ?)",
+            (uuid4().hex, space_id, action, before, after, _now()),
+        )
+
+    def _snapshot_version(self, conn, item_id):
+        item = conn.execute("SELECT * FROM context_items WHERE id = ?", (item_id,)).fetchone()
+        scopes = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT scope_type, scope_key, confidence FROM context_item_scopes "
+                "WHERE item_id = ? ORDER BY scope_type, scope_key",
+                (item_id,),
+            )
+        ]
+        evidence_ids = [
+            row[0]
+            for row in conn.execute(
+                "SELECT id FROM context_evidence WHERE item_id = ? ORDER BY created_at, id",
+                (item_id,),
+            )
+        ]
+        conn.execute(
+            "UPDATE context_item_versions SET scopes_json = ?, evidence_ids_json = ?, "
+            "inference_rationale = ?, authority = ?, extraction_text_key = ? "
+            "WHERE item_id = ? AND version = ?",
+            (
+                json.dumps(scopes),
+                json.dumps(evidence_ids),
+                item["inference_rationale"],
+                item["authority"],
+                _identity_text(item["canonical_text"]),
+                item_id,
+                item["current_version"],
+            ),
+        )
+
+    def _extraction_identity(self, conn, candidate, scopes):
+        routes = sorted(self._resolve_space(conn, scope)["id"] for scope in scopes)
+        payload = [
+            candidate.item_type,
+            candidate.epistemic_kind,
+            _identity_text(candidate.canonical_text),
+            routes,
+        ]
+        return sha256(json.dumps(payload).encode()).hexdigest()
+
+    def _attach_evidence(self, conn, item_id, evidence):
+        added = 0
+        for entry in evidence:
+            source = self._normalize_evidence(conn, entry)
+            if conn.execute(
+                "SELECT 1 FROM context_evidence WHERE item_id = ? AND source_message_record_id = ? "
+                "AND relationship = ? AND excerpt = ?",
+                (
+                    item_id,
+                    source["source_message_record_id"],
+                    source["relationship"],
+                    source["excerpt"],
+                ),
+            ).fetchone():
+                continue
+            columns = list(source)
+            conn.execute(
+                "INSERT INTO context_evidence (id, item_id, "
+                + ", ".join(columns)
+                + ", created_at) VALUES ("
+                + ", ".join("?" for _ in range(len(columns) + 3))
+                + ")",
+                (uuid4().hex, item_id, *(source[column] for column in columns), _now()),
+            )
+            added += 1
+        return added
+
+    def _link_shared_evidence(self, conn, item_ids):
+        for item_id in item_ids:
+            for row in conn.execute(
+                "SELECT DISTINCT b.item_id FROM context_evidence a JOIN context_evidence b "
+                "ON a.source_message_record_id = b.source_message_record_id "
+                "AND a.excerpt = b.excerpt WHERE a.item_id = ? AND b.item_id <> ? "
+                "ORDER BY b.item_id LIMIT 20",
+                (item_id, item_id),
+            ).fetchall():
+                first, second = sorted([item_id, row[0]])
+                conn.execute(
+                    "INSERT OR IGNORE INTO context_item_links VALUES (?, ?, 'shared_evidence', ?)",
+                    (first, second, _now()),
+                )
 
     def _row_to_brief(self, conn: sqlite3.Connection, row: sqlite3.Row) -> ConversationBrief:
         item_ids = tuple(
@@ -1008,6 +1794,7 @@ class ContextLibraryStore:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             context_item_ids=item_ids,
+            analysis_generation=int(row["analysis_generation"]),
         )
 
     @staticmethod
@@ -1038,6 +1825,7 @@ class ContextLibraryStore:
             updated_at=row["updated_at"],
             last_attempt_at=row["last_attempt_at"],
             completed_at=row["completed_at"],
+            analysis_generation=int(row["analysis_generation"]),
         )
 
     def _require_analysis_queue_job(self, job_id: str) -> ContextAnalysisQueueJob:
@@ -1054,6 +1842,7 @@ class ContextLibraryStore:
                 scope_key=item["scope_key"],
                 confidence=float(item["confidence"]),
                 created_at=item["created_at"],
+                space_id=item["space_id"] or "",
             )
             for item in conn.execute(
                 """
@@ -1080,9 +1869,14 @@ class ContextLibraryStore:
                 excerpt=item["excerpt"],
                 relationship=item["relationship"],
                 created_at=item["created_at"],
+                source_changed=(
+                    item["live_content"] is not None and item["excerpt"] not in item["live_content"]
+                ),
             )
             for item in conn.execute(
-                "SELECT * FROM context_evidence WHERE item_id = ? ORDER BY created_at, id",
+                "SELECT e.*, m.content AS live_content FROM context_evidence e "
+                "LEFT JOIN messages m ON m.id = e.source_message_id "
+                "WHERE e.item_id = ? ORDER BY e.created_at, e.id",
                 (row["id"],),
             ).fetchall()
         )
@@ -1100,6 +1894,10 @@ class ContextLibraryStore:
                 stale_at=item["stale_at"],
                 change_reason=item["change_reason"],
                 created_at=item["created_at"],
+                inference_rationale=item["inference_rationale"],
+                authority=item["authority"],
+                scopes=tuple(ScopeInput(**value) for value in json.loads(item["scopes_json"])),
+                evidence_ids=_load_list(item["evidence_ids_json"]),
             )
             for item in conn.execute(
                 """
@@ -1142,6 +1940,8 @@ class ContextLibraryStore:
             evidence=evidence,
             versions=versions,
             links=links,
+            inference_rationale=row["inference_rationale"],
+            authority=row["authority"],
         )
 
     @staticmethod
@@ -1290,7 +2090,7 @@ class ContextLibraryStore:
                     excerpt TEXT NOT NULL,
                     relationship TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    UNIQUE(item_id, source_message_record_id, relationship)
+                    UNIQUE(item_id, source_message_record_id, relationship, excerpt)
                 );
 
                 CREATE TABLE IF NOT EXISTS context_item_links (
@@ -1346,7 +2146,7 @@ class ContextLibraryStore:
                 CREATE INDEX IF NOT EXISTS idx_context_analysis_queue_source
                     ON context_analysis_queue(source_record_id, created_at);
                 INSERT OR REPLACE INTO schema_meta(key, value)
-                    VALUES ('context_schema_version', '5');
+                    VALUES ('context_schema_version', '7');
                 """
             )
             self._ensure_column(
@@ -1362,6 +2162,13 @@ class ContextLibraryStore:
                 "TEXT NOT NULL DEFAULT ''",
             )
             self._ensure_column(conn, "context_analysis_queue", "next_retry_at", "TEXT")
+            for table in ("conversation_briefs", "context_analysis_queue"):
+                self._ensure_column(
+                    conn,
+                    table,
+                    "analysis_generation",
+                    "INTEGER NOT NULL DEFAULT 0",
+                )
             self._ensure_column(
                 conn,
                 "context_analysis_queue",
@@ -1380,6 +2187,115 @@ class ContextLibraryStore:
                 ON context_analysis_queue(status, next_retry_at, created_at)
                 """
             )
+            self._ensure_linked_schema(conn)
+
+    def _ensure_linked_schema(self, conn):
+        legacy_authority = "authority" not in {
+            row["name"] for row in conn.execute("PRAGMA table_info(context_items)")
+        }
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS context_semantic_matches (
+                id TEXT PRIMARY KEY,
+                source_item_id TEXT NOT NULL REFERENCES context_items(id) ON DELETE CASCADE,
+                source_version INTEGER NOT NULL,
+                target_item_id TEXT NOT NULL REFERENCES context_items(id) ON DELETE CASCADE,
+                target_version INTEGER NOT NULL,
+                source_record_id TEXT NOT NULL,
+                relationship TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                rationale TEXT NOT NULL,
+                evidence_excerpt TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(source_item_id,source_version,target_item_id,target_version,
+                       source_record_id,relationship,evidence_excerpt)
+            );
+            CREATE INDEX IF NOT EXISTS idx_context_semantic_matches_source
+                ON context_semantic_matches(source_item_id,created_at);
+            CREATE INDEX IF NOT EXISTS idx_context_semantic_matches_target
+                ON context_semantic_matches(target_item_id,created_at);
+            CREATE TABLE IF NOT EXISTS context_spaces (
+                id TEXT PRIMARY KEY, scope_type TEXT NOT NULL, name TEXT NOT NULL,
+                revision INTEGER NOT NULL, corrected INTEGER NOT NULL DEFAULT 0,
+                merged_into TEXT REFERENCES context_spaces(id),
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS context_space_aliases (
+                scope_type TEXT NOT NULL, alias_key TEXT NOT NULL, alias TEXT NOT NULL,
+                space_id TEXT NOT NULL REFERENCES context_spaces(id),
+                PRIMARY KEY(scope_type, alias_key)
+            );
+            CREATE TABLE IF NOT EXISTS context_space_events (
+                id TEXT PRIMARY KEY, space_id TEXT NOT NULL REFERENCES context_spaces(id),
+                action TEXT NOT NULL, previous_value TEXT NOT NULL, next_value TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS context_extraction_identities (
+                identity TEXT PRIMARY KEY,
+                item_id TEXT NOT NULL REFERENCES context_items(id) ON DELETE CASCADE
+            );
+        """)
+        self._ensure_column(
+            conn, "context_item_scopes", "space_id", "TEXT REFERENCES context_spaces(id)"
+        )
+        for table in ("context_items", "context_item_versions"):
+            self._ensure_column(conn, table, "inference_rationale", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, table, "authority", "TEXT NOT NULL DEFAULT 'extraction'")
+        for column in ("scopes_json", "evidence_ids_json"):
+            self._ensure_column(conn, "context_item_versions", column, "TEXT NOT NULL DEFAULT '[]'")
+        self._ensure_column(
+            conn, "context_item_versions", "extraction_text_key", "TEXT NOT NULL DEFAULT ''"
+        )
+        for version in conn.execute(
+            "SELECT item_id, version, canonical_text FROM context_item_versions "
+            "WHERE extraction_text_key = ''"
+        ).fetchall():
+            conn.execute(
+                "UPDATE context_item_versions SET extraction_text_key = ? "
+                "WHERE item_id = ? AND version = ?",
+                (_identity_text(version["canonical_text"]), version["item_id"], version["version"]),
+            )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_context_version_text ON "
+            "context_item_versions(extraction_text_key, item_type, epistemic_kind)"
+        )
+        if legacy_authority:
+            # Historical revisions did not record actors; conservatively protect existing edits.
+            conn.execute("UPDATE context_items SET authority = 'user' WHERE current_version > 1")
+            conn.execute("UPDATE context_item_versions SET authority = 'user' WHERE version > 1")
+        evidence_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'context_evidence'"
+        ).fetchone()[0]
+        if "UNIQUE(item_id, source_message_record_id, relationship)" in evidence_sql:
+            # Keep evidence IDs while allowing successive excerpts of a changed message.
+            conn.execute("ALTER TABLE context_evidence RENAME TO context_evidence_legacy")
+            conn.execute(
+                evidence_sql.replace(
+                    "UNIQUE(item_id, source_message_record_id, relationship)",
+                    "UNIQUE(item_id, source_message_record_id, relationship, excerpt)",
+                )
+            )
+            conn.execute("INSERT INTO context_evidence SELECT * FROM context_evidence_legacy")
+            conn.execute("DROP TABLE context_evidence_legacy")
+            conn.execute(
+                "CREATE INDEX idx_context_evidence_source ON context_evidence"
+                "(source_conversation_id, source_message_id)"
+            )
+        for scope_type in ("core_self", "personal", "work"):
+            self._resolve_space(conn, ScopeInput(scope_type))
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_context_evidence_record ON "
+            "context_evidence(source_message_record_id, item_id)"
+        )
+        for row in conn.execute(
+            "SELECT DISTINCT item_id FROM context_item_scopes WHERE space_id IS NULL"
+        ).fetchall():
+            self._canonicalize_item_scopes(conn, row[0])
+        for row in conn.execute(
+            "SELECT id FROM context_items WHERE id IN (SELECT item_id FROM context_item_versions "
+            "WHERE scopes_json = '[]')"
+        ).fetchall():
+            # Pre-migration scopes were unversioned; retain the known current baseline only.
+            self._snapshot_version(conn, row[0])
 
     @staticmethod
     def _ensure_column(
@@ -1392,11 +2308,20 @@ class ContextLibraryStore:
         if column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
+        active = getattr(self._transaction_state, "connection", None)
+        if active is not None:
+            yield active
+            return
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
 
 def _normalize_scopes(scopes: Sequence[ScopeInput]) -> tuple[ScopeInput, ...]:
@@ -1423,6 +2348,18 @@ def _normalize_text_list(values: Sequence[str]) -> tuple[str, ...]:
         if text and text not in normalized:
             normalized.append(text[:4_000])
     return tuple(normalized[:100])
+
+
+def _identity_text(value: str) -> str:
+    return " ".join(normalize("NFKC", value).casefold().split())
+
+
+def _safe_scopes(scopes: Sequence[ScopeInput], sensitivity: str) -> tuple[ScopeInput, ...]:
+    if sensitivity != "sensitive" or not any(s.scope_type == "core_self" for s in scopes):
+        return tuple(scopes)
+    return _normalize_scopes(
+        [*(scope for scope in scopes if scope.scope_type != "core_self"), ScopeInput("personal")]
+    )
 
 
 def _require_text(label: str, value: str, limit: int) -> str:

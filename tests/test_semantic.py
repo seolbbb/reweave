@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from reweave.archive import ArchiveStore
+from reweave.context_library import ContextLibraryStore, EvidenceInput, ScopeInput
 from reweave.semantic import (
     MAX_CHUNK_CHARS,
     SearchEngine,
@@ -104,3 +105,50 @@ def test_changed_message_invalidates_only_its_embeddings(tmp_path, claude_sample
     assert not stale.ready
     assert refreshed.ready
     assert refreshed.indexed_chunks == initial.indexed_chunks
+
+
+@pytest.mark.parametrize("mode", ["keyword", "semantic", "auto"])
+def test_source_context_filters_apply_before_ranking(tmp_path, fixtures_dir, mode):
+    store, index, _ = _prepared_index(tmp_path, fixtures_dir)
+    engine = SearchEngine(store, index)
+    source = store.search("Obsidian", limit=1)[0].conversation_id
+    message = store.get_messages(source)[0]
+    library = ContextLibraryStore(store.db_path)
+    brief = library.save_brief(
+        conversation_id=source,
+        main_subject="Vault",
+        user_goal="Organize",
+        analysis_version="test",
+        prompt_version="test",
+        analysis_provider="test",
+        analysis_model="test",
+    )
+    library.create_item(
+        brief_id=brief.id,
+        canonical_text="Organize the vault",
+        item_type="project_fact",
+        epistemic_kind="observed",
+        confidence=0.95,
+        scopes=[ScopeInput("project", "Vault")],
+        evidence=[EvidenceInput(source, message.id, excerpt=message.content)],
+    )
+    space = next(space for space in library.list_spaces() if space.name == "Vault")
+    results, _ = engine.search_messages(
+        "Obsidian",
+        mode=mode,
+        space_id=space.id,
+        item_type="project_fact",
+        limit=1,
+    )
+    assert len(results) == 1 and results[0].conversation_id == source
+    assert (
+        engine.search_messages(
+            "Obsidian",
+            mode=mode,
+            space_id=space.id,
+            item_type="decision",
+            limit=1,
+        )[0]
+        == []
+    )
+    assert engine.search_messages("Obsidian", mode=mode, space_id="missing", limit=1)[0] == []

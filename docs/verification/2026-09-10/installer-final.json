@@ -1,0 +1,11 @@
+{
+  "installer_sha256": "8a96ee9131788f5b8820ae3f3e6743c32060659cc2cf11d783c42acc15777a57",
+  "isolated": true,
+  "workspace_target": ".pytest_cache/installer-qa-11f5f47d20c34280b3f01c7b612984cb",
+  "installed_files_verified": 720,
+  "install_exit": 0,
+  "uninstall_launcher_exit": 0,
+  "owned_files_removed": true,
+  "unrelated_file_preserved": true,
+  "application_started": false
+}
