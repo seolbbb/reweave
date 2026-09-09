@@ -1,0 +1,377 @@
+.contextExploreViews {
+  display: flex;
+  gap: 6px;
+  margin: -4px 0 20px;
+  flex-wrap: wrap;
+}
+.contextExploreViews button {
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+}
+.contextExploreViews button[aria-pressed="true"] {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+  font-weight: 600;
+}
+.contextGraph {
+  min-width: 0;
+}
+.graphToolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.graphToolbar label,
+.graphAccessibleList > label {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 0;
+}
+.graphToolbar label {
+  flex: 1 1 240px;
+  max-width: 420px;
+}
+.contextGraph input:not([type="checkbox"]),
+.contextGraph select {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  color: var(--color-text);
+  min-height: 44px;
+  padding: 8px 12px;
+  font: inherit;
+  width: 100%;
+  min-width: 0;
+}
+.graphZoom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.graphZoom > span {
+  width: 42px;
+  font-size: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.graphExplanation {
+  max-width: 76ch;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  margin: 16px 0;
+}
+.graphSubsetNotice,
+.graphShareWarning {
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-warning-subtle);
+  padding: 12px 16px;
+  color: var(--color-warning);
+  font-size: 14px;
+}
+.graphLoading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+}
+.graphCanvas {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  max-height: 540px;
+  overflow: auto;
+  max-width: 100%;
+  overscroll-behavior: contain;
+}
+.graphCanvas > svg {
+  display: block;
+  height: auto;
+}
+.graphEdges path {
+  stroke: var(--color-border-strong);
+  stroke-width: 1.4;
+  fill: none;
+}
+.graphEdges .selected path {
+  stroke: var(--color-accent);
+  stroke-width: 2.4;
+}
+.graphNode {
+  cursor: pointer;
+}
+.graphNode rect {
+  fill: var(--color-surface);
+  stroke: var(--color-border-strong);
+  stroke-width: 1.3;
+}
+.graphNode.space rect {
+  fill: var(--color-accent-subtle);
+  stroke: var(--color-accent);
+}
+.graphNode text {
+  fill: var(--color-text);
+  font: 14px var(--font-sans);
+  pointer-events: none;
+}
+.graphNode .graphNodeKind {
+  fill: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.graphNode:hover rect,
+.graphNode.selected rect {
+  stroke: var(--color-accent);
+  stroke-width: 2.5;
+}
+.graphNode:focus {
+  outline: none;
+}
+.graphNode:focus-visible rect {
+  stroke: var(--color-accent);
+  stroke-width: 4;
+}
+.graphSelection {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 24px;
+  margin-top: 16px;
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+}
+.graphSelection h3 {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  line-height: 1.5;
+  margin: 6px 0 12px;
+  overflow-wrap: anywhere;
+}
+.graphSelection h4 {
+  font-size: 14px;
+  margin: 0 0 10px;
+}
+.graphSelection ul {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.graphSelection li {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 2px;
+  border-top: 1px solid var(--color-border);
+  padding: 8px 0;
+  overflow-wrap: anywhere;
+}
+.graphSelection li > span,
+.graphSelection p {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+.graphSelection .contextTextButton {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.graphAccessibleList {
+  margin: 20px 0;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 16px;
+}
+.graphAccessibleList > summary,
+.publicLabelEditor > summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 10px 0;
+  font-weight: 600;
+}
+.graphAccessibleList > label {
+  max-width: 440px;
+  margin: 12px 0;
+}
+.graphNodeList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 340px;
+  overflow: auto;
+}
+.graphNodeList > button {
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  padding: 12px 16px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.graphNodeList > button.selected {
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+.graphNodeList span,
+.graphNodeList small {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.graphNodeList strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.graphEmpty {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  padding: 32px;
+  border-radius: var(--radius-panel);
+  margin: 16px 0;
+}
+.graphEmpty > svg {
+  color: var(--color-accent);
+}
+.graphEmpty h3 {
+  font-size: 22px;
+  margin: 12px 0;
+}
+.graphEmpty p {
+  color: var(--color-text-secondary);
+  max-width: 65ch;
+}
+.graphSharing {
+  margin: 24px 0;
+}
+.graphSharingBody {
+  margin-top: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  padding: 24px;
+}
+.graphShareIntro {
+  display: flex;
+  align-items: start;
+  gap: 14px;
+}
+.graphShareIntro > svg {
+  color: var(--color-accent);
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+.graphShareIntro h3 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+.graphShareIntro p,
+.publicLabelEditor p {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  max-width: 80ch;
+}
+.graphShareScopes {
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+.graphShareScopes legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+.graphShareScopes label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  overflow-wrap: anywhere;
+}
+.graphShareScopes input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-accent);
+  flex: 0 0 auto;
+}
+.publicLabelEditor {
+  margin: 12px 0 20px;
+}
+.publicLabelEditor > label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--color-border);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.publicLabelEditor small {
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  margin-top: 4px;
+}
+.graphShareNotice {
+  padding: 12px 16px;
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  border-radius: 8px;
+}
+.graphSharePreview {
+  margin-top: 24px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 20px;
+}
+.graphSharePreview h3 {
+  font-size: 24px;
+  margin: 0 0 8px;
+}
+.graphSharePreview p {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+.graphShareWarnings {
+  color: var(--color-warning);
+  font-size: 14px;
+}
+.graphSharePreview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  margin: 16px 0;
+}
+@media (max-width: 700px) {
+  .graphSelection,
+  .graphNodeList,
+  .publicLabelEditor > label {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .graphSelection {
+    gap: 16px;
+    padding: 16px;
+  }
+  .graphSharingBody {
+    padding: 16px;
+  }
+  .graphShareIntro {
+    gap: 10px;
+  }
+  .graphToolbar label {
+    max-width: none;
+  }
+  .graphCanvas {
+    max-height: 440px;
+  }
+}

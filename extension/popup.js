@@ -3,6 +3,101 @@ const detail = document.querySelector("#detail");
 const retry = document.querySelector("#retry");
 const save = document.querySelector("#save");
 const useContext = document.querySelector("#use");
+const destinationPanel = document.querySelector("#destination-panel");
+const destinationChoice = document.querySelector("#destination-choice");
+const scopeChoices = document.querySelector("#scope-choices");
+const rememberDestination = document.querySelector("#remember-destination");
+const sensitivePanel = document.querySelector("#sensitive-panel");
+const sensitiveItems = document.querySelector("#sensitive-items");
+const confirmSensitive = document.querySelector("#confirm-sensitive");
+const reviewSensitive = document.querySelector("#review-sensitive");
+const changeDestination = document.querySelector("#change-destination");
+let currentIdentity = null;
+let destinationRevision = 0;
+let previewToken = null;
+
+function appendText(parent, tag, text, className) {
+  const element = document.createElement(tag);
+  element.textContent = text;
+  if (className) element.className = className;
+  parent.appendChild(element);
+  return element;
+}
+
+function renderDestination(response) {
+  document.body.dataset.status = "ready";
+  title.textContent = "Choose this conversation's destination";
+  detail.textContent = "Your draft is unchanged. The saved choice applies only to this conversation.";
+  destinationPanel.hidden = false;
+  sensitivePanel.hidden = true;
+  useContext.hidden = true;
+  reviewSensitive.hidden = true;
+  destinationRevision = response.destination_revision;
+  destinationChoice.value = response.destination === "unknown" ? "" : response.destination;
+  document.querySelector("#destination-hint").textContent = response.suggested_destination
+    ? `Local context suggests ${response.suggested_destination}. Confirm the actual destination yourself.`
+    : "The page address does not establish who can see this conversation.";
+  scopeChoices.replaceChildren();
+  appendText(scopeChoices, "legend", "Allowed spaces");
+  for (const space of response.spaces || []) {
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = space.space_id;
+    checkbox.dataset.scopeType = space.scope_type;
+    checkbox.checked = (response.allowed_space_ids || []).includes(space.space_id);
+    label.appendChild(checkbox);
+    appendText(label, "span", `${space.name} (${space.scope_type})${space.suggested ? " · suggested" : ""}`);
+    scopeChoices.appendChild(label);
+  }
+  filterDestinationScopes();
+}
+
+function filterDestinationScopes() {
+  const types = {
+    private: ["core_self", "personal", "work", "project", "topic", "destination"],
+    work: ["core_self", "work", "project", "topic", "destination"],
+    client: ["core_self", "project", "topic", "destination"],
+    shared: ["core_self", "project", "topic", "destination"],
+  }[destinationChoice.value] || [];
+  for (const input of scopeChoices.querySelectorAll("input")) {
+    input.disabled = !types.includes(input.dataset.scopeType);
+    if (input.disabled) input.checked = false;
+  }
+  const selected = scopeChoices.querySelectorAll("input:checked").length;
+  rememberDestination.disabled = !destinationChoice.value || (destinationChoice.value !== "private" && selected === 0);
+}
+
+function renderSensitive(response) {
+  title.textContent = "Select sensitive items to use once";
+  detail.textContent = "Nothing from this preview has been inserted. Review the claims and their evidence.";
+  document.body.dataset.status = "ready";
+  destinationPanel.hidden = true;
+  sensitivePanel.hidden = false;
+  previewToken = response.preview_token;
+  sensitiveItems.replaceChildren();
+  document.querySelector("#sensitive-hint").textContent = `Destination: ${response.destination}. Inferences remain uncertain even when you approve their use.`;
+  for (const item of response.items || []) {
+    const article = document.createElement("article");
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = item.item_id;
+    input.dataset.version = String(item.version);
+    label.appendChild(input);
+    appendText(label, "span", `${item.epistemic_kind} · confidence ${Math.round(item.confidence * 100)}% · version ${item.version}`);
+    article.appendChild(label);
+    appendText(article, "p", item.text);
+    if (item.inference_rationale) appendText(article, "p", `Rationale: ${item.inference_rationale}`, "detail");
+    for (const source of item.sources || []) {
+      appendText(article, "p", `${source.provider} · ${source.title} · message ${source.message_index + 1}${source.source_changed ? " · source changed" : ""}${source.source_available === false ? " · preserved source snapshot" : ""}`, "privacy-note");
+      appendText(article, "blockquote", source.excerpt || "No evidence excerpt available.");
+    }
+    sensitiveItems.appendChild(article);
+  }
+  if (!response.items?.length) appendText(sensitiveItems, "p", "No relevant sensitive items are available within the approved scopes and preview size limit.");
+  confirmSensitive.disabled = true;
+}
 
 const stateCopy = {
   ready: {
@@ -107,6 +202,34 @@ function renderContextResult(response) {
   useContext.textContent = "Refresh Reweave context";
   save.hidden = false;
   save.disabled = false;
+  rememberDestination.disabled = false;
+  if (response?.provider && response?.external_id) {
+    currentIdentity = { provider: response.provider, external_id: response.external_id };
+  }
+  changeDestination.hidden = !currentIdentity;
+  reviewSensitive.hidden = !response?.sensitive_available;
+  if (response?.status === "destination_confirmation_required") {
+    renderDestination(response);
+    return;
+  }
+  if (response?.status === "sensitive_preview") {
+    renderSensitive(response);
+    return;
+  }
+  destinationPanel.hidden = true;
+  sensitivePanel.hidden = true;
+  if (response?.status === "destination_saved") {
+    document.body.dataset.status = "ready";
+    title.textContent = "Destination remembered";
+    detail.textContent = `Saved as ${response.destination} for this conversation. Choose Use to add context.`;
+    useContext.textContent = "Use with saved destination";
+    return;
+  }
+  const reasons = document.querySelector("#use-reasons");
+  reasons.replaceChildren();
+  for (const item of response?.used || []) appendText(reasons, "li", `${item.item_id}: ${(item.reasons || []).join("; ")}`);
+  for (const reason of response?.excluded_reasons || []) appendText(reasons, "li", reason);
+  document.querySelector("#use-explanation").hidden = !reasons.children.length;
 
   if (response?.status === "inserted") {
     document.body.dataset.status = "saved";
@@ -121,7 +244,7 @@ function renderContextResult(response) {
   const errorCopy = {
     unsupported_page: [
       "Open a supported conversation",
-      "Use works on a private, signed-in ChatGPT or Claude conversation page.",
+      "Use works on a signed-in ChatGPT or Claude conversation page with a confirmed destination.",
     ],
     logged_out: [`Sign in to ${providerName}`, `Sign in to ${providerName}, then try Use again.`],
     changed_dom: [`${providerName} page changed`, "Reload the conversation and try again."],
@@ -133,6 +256,9 @@ function renderContextResult(response) {
     empty_draft: ["Write a request first", "Add a non-empty draft, then choose Use Reweave context."],
     draft_too_large: ["Draft is too large", "Shorten the draft or existing Context block, then try again."],
     draft_changed: ["Draft changed safely", "Reweave did not overwrite your edits. Choose Use again."],
+    conversation_changed: ["The active conversation changed", "Choose Use again to review the destination for the current conversation."],
+    destination_changed: ["Destination choices changed", "Choose Change destination to review the latest allowed spaces."],
+    confirmation_expired: ["Preview needs to be refreshed", "Your draft is unchanged. Review sensitive context again before approving it."],
     context_unavailable: ["No relevant Context found", "Your draft is unchanged. Try a more specific request."],
     context_request_too_large: ["Conversation is too large", "This chat exceeds the safe local transfer limit."],
     invalid_context: ["Could not assemble Context", "Your draft is unchanged. Reload and try again."],
@@ -187,7 +313,7 @@ function saveConversation() {
   });
 }
 
-function useReweave() {
+function useReweave(options = {}) {
   document.body.dataset.status = "saving";
   title.textContent = "Adding Reweave context…";
   detail.textContent = "Reading the active conversation and draft after your explicit request.";
@@ -195,8 +321,10 @@ function useReweave() {
   useContext.textContent = "Adding Context…";
   save.hidden = true;
   retry.hidden = true;
+  rememberDestination.disabled = true;
+  confirmSensitive.disabled = true;
 
-  chrome.runtime.sendMessage({ type: "reweave:use-context" }, (response) => {
+  chrome.runtime.sendMessage({ type: "reweave:use-context", options }, (response) => {
     if (chrome.runtime.lastError || !response) {
       renderContextResult({ status: "unavailable", reason: "native_host_unavailable" });
       return;
@@ -207,5 +335,23 @@ function useReweave() {
 
 retry.addEventListener("click", checkAvailability);
 save.addEventListener("click", saveConversation);
-useContext.addEventListener("click", useReweave);
+useContext.addEventListener("click", () => useReweave());
+destinationChoice.addEventListener("change", filterDestinationScopes);
+scopeChoices.addEventListener("change", filterDestinationScopes);
+rememberDestination.addEventListener("click", () => useReweave({
+  action: "save_destination", expected_identity: currentIdentity,
+  destination: destinationChoice.value, expected_revision: destinationRevision,
+  allowed_space_ids: Array.from(scopeChoices.querySelectorAll("input:checked")).map(input => input.value),
+}));
+changeDestination.addEventListener("click", () => useReweave({ action: "destination_settings" }));
+reviewSensitive.addEventListener("click", () => useReweave({ action: "preview_sensitive", expected_identity: currentIdentity }));
+sensitiveItems.addEventListener("change", () => {
+  confirmSensitive.disabled = sensitiveItems.querySelectorAll("input:checked").length === 0;
+});
+confirmSensitive.addEventListener("click", () => useReweave({
+  action: "confirm_sensitive", expected_identity: currentIdentity, preview_token: previewToken,
+  selected_items: Array.from(sensitiveItems.querySelectorAll("input:checked")).map(input => ({
+    item_id: input.value, version: Number(input.dataset.version),
+  })),
+}));
 checkAvailability();

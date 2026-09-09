@@ -139,7 +139,7 @@ describe.each(providers)("$id explicit Use adapter", (provider) => {
   });
 });
 
-function loadBackground({ insertion = { ok: true }, nativeStatus = "ready" } = {}) {
+function loadBackground({ insertion = { ok: true }, nativeStatus = "ready", nativeReplies = [], url = "https://chatgpt.com/c/conversation-42" } = {}) {
   let listener;
   const extraction = {
     ok: true,
@@ -156,6 +156,8 @@ function loadBackground({ insertion = { ok: true }, nativeStatus = "ready" } = {
   const calls = { tabQueries: 0, injections: [], nativeMessages: [], tabMessages: [] };
   const chrome = {
     runtime: {
+      id: "synthetic-extension",
+      getURL: (path) => `chrome-extension://synthetic-extension/${path}`,
       lastError: undefined,
       onMessage: { addListener(callback) { listener = callback; } },
       onStartup: { addListener() {} },
@@ -163,6 +165,10 @@ function loadBackground({ insertion = { ok: true }, nativeStatus = "ready" } = {
         calls.nativeMessages.push(message);
         if (message.type === "ping") {
           callback({ type: "status", status: "ready", reason: "connected", protocol_version: 1 });
+          return;
+        }
+        if (nativeReplies.length) {
+          callback({ type: "context_result", protocol_version: 1, ...nativeReplies.shift() });
           return;
         }
         if (nativeStatus !== "ready") {
@@ -189,7 +195,7 @@ function loadBackground({ insertion = { ok: true }, nativeStatus = "ready" } = {
       onUpdated: { addListener() {} },
       query(_query, callback) {
         calls.tabQueries += 1;
-        callback([{ id: 17, url: "https://chatgpt.com/c/conversation-42" }]);
+        callback([{ id: 17, url }]);
       },
       sendMessage(tabId, message, callback) {
         calls.tabMessages.push({ tabId, message });
@@ -222,12 +228,12 @@ function loadBackground({ insertion = { ok: true }, nativeStatus = "ready" } = {
 
 function sendMessage(listener, message) {
   return new Promise((resolve) => {
-    expect(listener(message, {}, resolve)).toBe(true);
+    expect(listener(message, { id: "synthetic-extension", url: "chrome-extension://synthetic-extension/popup.html" }, resolve)).toBe(true);
   });
 }
 
 describe("explicit Use background and popup", () => {
-  it("does not inspect the provider page before Use and inserts through private cross-space", async () => {
+  it("does not inspect the provider page before Use or infer private rights from its address", async () => {
     const { listener, calls } = loadBackground();
 
     expect(calls.tabQueries).toBe(0);
@@ -243,11 +249,12 @@ describe("explicit Use background and popup", () => {
       type: "assemble_context",
       protocol_version: 1,
       context_request: {
-        destination: "private",
-        allowed_scopes: [],
+        action: "use",
         draft: "Draft a source-grounded release note.",
       },
     });
+    expect(calls.nativeMessages.at(-1).context_request.destination).toBeUndefined();
+    expect(calls.nativeMessages.at(-1).context_request.allowed_scopes).toBeUndefined();
     expect(calls.injections.map((entry) => entry.files?.[0] || entry.func.name)).toEqual([
       "chatgpt-adapter.js",
       "collectContextRequestFromPage",
@@ -291,5 +298,117 @@ describe("explicit Use background and popup", () => {
     useButton.dispatchEvent(new window.Event("click"));
     expect(document.querySelector("#title").textContent).toBe("Context added to your draft");
     expect(useButton.textContent).toBe("Refresh Reweave context");
+  });
+});
+
+
+describe("destination and sensitive trust in the extension", () => {
+  it("returns destination review without inserting or installing a reminder", async () => {
+    const { listener, calls } = loadBackground({ nativeReplies: [{
+      status: "destination_confirmation_required", destination_revision: 0, spaces: [],
+    }] });
+    const result = await sendMessage(listener, { type: "reweave:use-context" });
+    expect(result.status).toBe("destination_confirmation_required");
+    expect(result.external_id).toBe("conversation-42");
+    expect(calls.injections.map(x => x.func?.name)).not.toContain("insertContextIntoPage");
+    expect(calls.tabMessages).toEqual([]);
+  });
+
+  it("requires an explicit retry after remembering a destination", async () => {
+    const { listener, calls } = loadBackground({ nativeReplies: [{ status: "destination_saved", destination: "private", destination_revision: 1 }] });
+    const result = await sendMessage(listener, { type: "reweave:use-context", options: {
+      action: "save_destination", destination: "private", allowed_space_ids: [], expected_revision: 0,
+      expected_identity: { provider: "chatgpt", external_id: "conversation-42" },
+    } });
+    expect(result.status).toBe("destination_saved");
+    expect(calls.nativeMessages).toHaveLength(1);
+    expect(calls.injections.some(x => x.func?.name === "insertContextIntoPage")).toBe(false);
+  });
+
+  it("rejects page and content-script approval messages before reading any page", () => {
+    const { listener, calls } = loadBackground();
+    let result;
+    expect(listener({ type: "reweave:use-context", options: { action: "save_destination", destination: "private" } }, {
+      id: "synthetic-extension", url: "https://chatgpt.com/c/conversation-42", tab: { id: 17 },
+    }, value => { result = value; })).toBe(false);
+    expect(result.reason).toBe("invalid_sender");
+    expect(calls.tabQueries).toBe(0);
+    expect(calls.nativeMessages).toEqual([]);
+  });
+
+  it("does not apply an earlier conversation's choices to the new active tab", async () => {
+    const { listener, calls } = loadBackground();
+    const result = await sendMessage(listener, { type: "reweave:use-context", options: {
+      action: "save_destination", expected_identity: { provider: "claude", external_id: "different" },
+    } });
+    expect(result.reason).toBe("conversation_changed");
+    expect(calls.injections).toEqual([]);
+  });
+
+  it("consumes sensitive confirmation only for the same explicit action and preserves draft checks", async () => {
+    const { listener, calls } = loadBackground({ nativeReplies: [{ status: "sensitive_confirmed", confirmation_token: "one-use-token" }], insertion: { ok: false, reason: "draft_changed" } });
+    const result = await sendMessage(listener, { type: "reweave:use-context", options: {
+      action: "confirm_sensitive", preview_token: "preview", selected_items: [{ item_id: "project-high", version: 1 }],
+    } });
+    expect(calls.nativeMessages).toHaveLength(2);
+    expect(calls.nativeMessages[1].context_request.confirmation_token).toBe("one-use-token");
+    expect(calls.nativeMessages[1].context_request.draft).toBe(calls.nativeMessages[0].context_request.draft);
+    expect(result.reason).toBe("draft_changed");
+    expect(calls.tabMessages).toEqual([]);
+  });
+
+  it("checks the provider again before insertion after a cross-provider navigation", async () => {
+    const { listener, calls } = loadBackground();
+    await sendMessage(listener, { type: "reweave:use-context" });
+    const insertion = calls.injections.find(x => x.func?.name === "insertContextIntoPage");
+    let inserted = false;
+    const result = vm.runInNewContext(`(${insertion.func.toString()})(...args)`, {
+      args: insertion.args,
+      __reweaveProviderAdapter: { provider: "claude", insertContext() { inserted = true; return { ok: true }; } },
+    });
+    expect(result.reason).toBe("conversation_changed");
+    expect(inserted).toBe(false);
+  });
+
+  it("shows local preview text safely and never selects sensitive items automatically", () => {
+    const { document, window } = parseHTML(popupHtml);
+    const messages = [];
+    const chrome = { runtime: { sendMessage(message, callback) {
+      messages.push(message);
+      if (message.type === "reweave:check-availability") return callback({ status: "ready" });
+      callback({ status: "sensitive_preview", provider: "chatgpt", external_id: "conversation-42", destination: "private", preview_token: "preview", items: [{
+        item_id: "sensitive", version: 2, text: "<script>bad()</script> Sensitive claim.", epistemic_kind: "inferred", confidence: 0.6,
+        sources: [{ provider: "test", title: "Synthetic evidence", message_index: 0, excerpt: "Evidence text." }],
+      }] });
+    } } };
+    vm.runInNewContext(popupSource, { chrome, document });
+    document.querySelector("#use").dispatchEvent(new window.Event("click"));
+    expect(document.querySelector("#sensitive-panel").hidden).toBe(false);
+    expect(document.querySelector("#sensitive-items script")).toBeNull();
+    expect(document.querySelector("#sensitive-items").textContent).toContain("<script>bad()</script>");
+    expect(document.querySelector("#confirm-sensitive").disabled).toBe(true);
+    expect(messages).toHaveLength(2);
+  });
+
+  it("requires a destination choice and does not Use automatically after saving", () => {
+    const { document, window } = parseHTML(popupHtml);
+    const messages = [];
+    const chrome = { runtime: { sendMessage(message, callback) {
+      messages.push(message);
+      if (message.type === "reweave:check-availability") return callback({ status: "ready" });
+      if (message.options?.action === "save_destination") return callback({ status: "destination_saved", provider: "chatgpt", external_id: "conversation-42", destination: "private", destination_revision: 1 });
+      callback({ status: "destination_confirmation_required", provider: "chatgpt", external_id: "conversation-42", destination: "unknown", destination_revision: 0, spaces: [] });
+    } } };
+    vm.runInNewContext(popupSource, { chrome, document });
+    document.querySelector("#use").dispatchEvent(new window.Event("click"));
+    expect(document.querySelector("#destination-panel").hidden).toBe(false);
+    expect(document.querySelector("#remember-destination").disabled).toBe(true);
+    const choice = document.querySelector("#destination-choice");
+    choice.querySelector('[value="private"]').selected = true;
+    choice.dispatchEvent(new window.Event("change"));
+    document.querySelector("#remember-destination").dispatchEvent(new window.Event("click"));
+    expect(messages.at(-1).options.action).toBe("save_destination");
+    expect(messages).toHaveLength(3);
+    expect(document.querySelector("#use").textContent).toBe("Use with saved destination");
   });
 });
