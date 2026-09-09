@@ -1,0 +1,20 @@
+Use the installed ui-ux-pro-max skill to implement Reweave's selected UI/UX direction: A — Reading Room. The owner selected A on 2026-09-09. Do not ask for the A/B/C choice again.
+
+Read these files:
+C:/Users/Seongbeom/.codex/visualizations/2026/09/09/01a0866f-063f-7ee0-8419-53930ec8d1c7/reweave-uiux-draft/direction-a.png
+C:/Users/Seongbeom/.codex/visualizations/2026/09/09/01a0866f-063f-7ee0-8419-53930ec8d1c7/reweave-uiux-draft/design-system/MASTER.md
+C:/Users/Seongbeom/.codex/visualizations/2026/09/09/01a0866f-063f-7ee0-8419-53930ec8d1c7/reweave-uiux-draft/design-system/pages/context-home.md
+C:/Users/Seongbeom/.codex/visualizations/2026/09/09/01a0866f-063f-7ee0-8419-53930ec8d1c7/reweave-uiux-draft/tokens.json
+C:/Users/Seongbeom/.codex/visualizations/2026/09/09/01a0866f-063f-7ee0-8419-53930ec8d1c7/reweave-uiux-draft/DESIGN_BRIEF.md
+
+Skill path:
+C:/Users/Seongbeom/.codex/skills/ui-ux-pro-max/SKILL.md
+
+Apply A's ivory and sage palette, readable document layout, clear sources, reduced navigation and consistent typography throughout the desktop app and extension. Use the written token system to correct image artifacts: sans-serif body, 16px/1.55 leading, normal desktop reading titles near 30-32px. B and C are exploration history.
+
+First read AGENTS.md and the canonical product documents; record this visual choice and affected roadmap work before implementation. Build real accessible responsive components with the existing stack. Preserve stored data and the explicit Save/Use boundary. 'How to use in chat' should explain the extension flow rather than silently injecting or submitting a request.
+
+Carry out the wider practical-use goal, functionality, tests, fresh Windows executable builds and feature-to-dev-to-main integration from my original Goal. Use isolated data and browser environments without operating my actual mouse, keyboard, clipboard, desktop windows or active browser profile. Distinguish mockups, browser checks, package checks and actual-user evidence.
+
+This design draft did not change application source or canonical product gates. Only explicit instructions in the complete Goal may revise those gates.
+

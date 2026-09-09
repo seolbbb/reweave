@@ -2,156 +2,71 @@
 
 ## Snapshot
 
-- Last verified: 2026-07-22
+- Last verified: 2026-09-10 (isolated implementation, browser and fresh executable verification)
 - Working language: English
 - Current phase: PHASE-002
-- State: blocked
-- Repository state: TASK-001 through TASK-004 are complete and PHASE-001 exit verification is
-  available. PHASE-002 implementation must not begin until its real-archive entry evidence exists.
-  Re-observe Git on every resume.
-- Current implementation identity: Local archive and search application with a primary
-  Context Home and Explorer, onboarding, archive management, optional hybrid search, cited
-  Ask Archive, Insight Reports, and a Phase 0 Memory Audit pilot.
+- State: active
+- Repository state: This delivery started from a clean worktree at 2303357 on
+  `codex/reading-room-product`. The required dev-PR/main integration record accompanies the
+  delivered artifacts; re-observe Git tips rather than inferring them from this source snapshot.
+  Historical TASK-001 through TASK-004 evidence below is not treated as a fresh run.
+  DEC-026 permits isolated implementation before final real-data acceptance.
+- Current implementation identity: Reading Room Context Home, Explore, Sources and global search,
+  with complete-source import analysis, linked spaces, correction history, trust, Graph, Review
+  and encrypted maintenance. Ask Archive, Insight Reports and the Phase 0 audit remain internal legacy data/API
+  foundations; their standalone UI destinations have been removed.
 - Intended product identity: Linked Context Library and explicit web-chat Context layer defined in PRODUCT_SPEC.md.
 
 ## Implemented
 
-Current code and historical verification show:
+The following is observed in the current working tree. Verification strength and remaining
+limitations are separated below; presence in this list is not final product acceptance.
 
-- ChatGPT and Claude JSON and zip import into a local SQLite archive.
-- Idempotent archive update behavior and safe zip extraction.
-- FTS5, trigram, and optional local semantic indexing with hybrid retrieval.
-- Conversation search, source inspection, and Markdown export.
-- Source-grounded Ask Archive with citation validation.
-- Selected-conversation Insight Reports with BYOK providers.
-- LLM provider profiles, operating-system credential storage, and model discovery.
-- Archive backup, restore, removal, onboarding, local web UI, and pywebview desktop packaging.
-- A separate Phase 0 Memory Audit pilot with claim extraction, evidence search, human review, local sessions, and redacted export.
-- Windows PyInstaller packaging through packaging/Reweave.spec.
-- Durable Conversation Brief and Context Item persistence in the main archive database,
-  including structured Brief fields, item types, epistemic kinds, scopes, confidence,
-  sensitivity, status, immutable versions, timestamps, item links, and source evidence.
-- Compact source-evidence snapshots and nullable live source links that preserve derived
-  Context when an original conversation is removed.
-- Idempotent Brief persistence by source and analysis version, plus app-startup Context
-  schema initialization.
-- A dedicated source-grounded extraction pipeline that creates one required Conversation
-  Brief and zero or more supported Context Items through the configured BYOK provider.
-- An authenticated provider-neutral Context assembly endpoint accepts one bounded ChatGPT or
-  Claude current-chat payload and non-empty draft after an explicit bridge request, while
-  rejecting unauthenticated, malformed, oversized, unsafe-scope, and unavailable-context cases.
-  Empty allowed scopes mean cross-space retrieval only for a private destination; every
-  non-private destination still requires explicit bounded scopes.
-- Context assembly filters inactive and sensitive items plus destination-unsafe scopes before
-  deterministic local relevance ranking, exact-text deduplication, previous-item exclusion, and
-  whole-item character budgeting; insertion-ready output includes stable item markers and compact
-  source provenance without persisting or echoing the current chat or draft.
-- Versioned Auto, Project, Learning, Research/Writing, and Context Handoff prompts that treat
-  archived conversation content as untrusted data and require exact source excerpts.
-- Conservative normalization for epistemic kind, scope, confidence, sensitivity, evidence,
-  duplicate items, interrupted analysis, and changed source conversations.
-- A non-blocking backend Context analysis job API that resolves inline or saved-profile BYOK
-  settings, serializes model calls, reports terminal success or failure, and reuses unchanged
-  completed analysis.
-- A schema-v5 durable Context analysis queue records one profile-independent pending job for each
-  explicit web-capture source version after local capture completes. Unchanged Save repeats reuse
-  the same job, while a newer source version supersedes older pending, running, or failed work.
-- Durable queue reads survive app restart. Explicit retry resolves the current inline or saved BYOK
-  profile only at attempt time, serializes through the existing extraction worker, records safe
-  terminal state and attempt metadata without credentials or copied source content, reuses the
-  idempotent Brief and Context Item path, and recovers interrupted app-process work as retryable.
-- A wake-driven local scheduler starts with the app and after successful capture or saved BYOK
-  profile connection. It resolves only the active connected saved profile, atomically claims at
-  most three ready jobs, and serializes them through the existing single Context worker so one
-  source version cannot run concurrently or again after completion.
-- The scheduler leaves no-key work pending without an attempt, returns offline work to pending
-  without consuming an attempt, and gives transient provider failures durable 60-second,
-  five-minute, 15-minute, then one-hour capped retry times while preserving explicit retry.
-  Schema-v5 queue rows expose local-only character and conservative UTF-8 token estimates computed
-  from the exact prepared extraction input before the provider call; they store neither source
-  content, credentials, nor a profile identifier.
-- Durable Context Brief and Item list/detail APIs that expose analysis metadata, scopes,
-  versions, links, compact evidence snapshots, and whether the live source still exists.
-- Context is the default application surface, with Home rendering recent Conversation Briefs,
-  active projects and topics, insights and lessons, decisions, open questions, follow-up, and
-  actions from the linked Context model.
-- Explorer renders the same Context Items through Core Self, Personal, Work, Project, Topic,
-  and Destination scopes without forcing one exclusive hierarchy; multi-scope items remain
-  discoverable from every applicable space.
-- Context Item detail renders type, epistemic kind, sensitivity, confidence, status, version,
-  scopes, compact source evidence, source availability, and link/history counts.
-- Context frontend loading, empty, error, and no-items-in-scope states are explicit and the
-  Home and Explorer layouts adapt to desktop and 375-pixel mobile widths.
-- Every live Context evidence reference offers an explicit action that opens the supporting
-  conversation around the exact message in the existing conversation drawer.
-- Evidence whose source conversation was removed remains readable as a compact local snapshot
-  without a misleading source action; source-load failures preserve the excerpt and explain
-  the fallback inline.
-- A provider-neutral explicit web capture model validates complete ordered ChatGPT and Claude
-  conversations, including stable external identity, timestamps, roles, message identity,
-  non-empty content, duplicate IDs, unknown fields, and bounded payload size.
-- `POST /api/capture/conversations` persists valid captures immediately without an LLM key,
-  reuses the archive's transactional import, FTS, and embedding-invalidation path, and reports
-  created, updated, or unchanged outcomes without returning raw conversation content. Explicit
-  web captures use stable provider identity rather than the import path's timestamp fallback, so
-  distinct conversations with the same creation time cannot overwrite one another.
-- The production Manifest V3 extension uses `nativeMessaging`, `activeTab`, and `scripting`, with
-  no provider or localhost host permissions and no persistent content script. It queries and
-  injects the matching adapter into the active ChatGPT or Claude tab only after the user invokes
-  Save or Use from the popup or browser action shortcut.
-- After a successful explicit Save, the same authorized document receives a page-lifetime
-  reminder controller. It observes structural provider identity and complete assistant-turn
-  counts without reading message text, waits for one new assistant response and 30 seconds of
-  conversation inactivity, then shows a non-modal prompt and per-tab `SAVE` badge. The prompt
-  auto-hides after eight seconds while the badge remains; explicit Save or dismissal clears both,
-  and dismissal re-arms only after another assistant response.
-- Reminder Save performs a fresh whole-conversation read only from the already authorized
-  isolated world, validates the sender tab, provider, and conversation identity in the background
-  worker, and reuses the bounded Native Messaging path. Reminder state is not stored locally or
-  in extension storage; navigation, changed DOM, browser restart, and page closure clear or
-  abandon it, while streaming output defers evaluation.
-- The ChatGPT adapter fails closed unless it can identify one supported HTTPS conversation URL,
-  a signed-in page, consecutive complete conversation turns, a user-authored first turn, unique
-  message identities, non-empty content, and bounded normalized output.
-- The Claude adapter uses the same explicit action boundary and fails closed unless it can
-  identify one supported HTTPS conversation UUID, a signed-in page, stable current DOM markers,
-  the complete alternating turn sequence, unique message identities, non-empty content, and
-  bounded normalized output.
-- After explicit Use, both adapters require one complete bounded user-assistant chat and a
-  non-empty bounded draft. The background worker derives private destination trust only from the
-  canonical signed-in conversation URL, sends no scope index to the browser, and rejects unknown,
-  shared, streaming, incomplete, oversized, or changed state before insertion.
-- Successful Context assembly inserts one bounded identifiable block before the preserved draft.
-  The adapter verifies provider identity and an unchanged draft immediately before mutation;
-  another explicit Use replaces the existing block without duplication, automatic refresh,
-  submission, or conversation Save. Successful Use starts the existing page-lifetime reminder.
-- The popup reports Save plus Use, refresh, empty draft, concurrent edit, unavailable Context,
-  unsupported, logged-out, changed-DOM, streaming, incomplete, oversized, invalid, unavailable,
-  and incompatible outcomes with explicit 44-pixel actions and no passive provider-page read.
-- The desktop app publishes an atomic, short-lived runtime descriptor with an ephemeral token,
-  protects the loopback availability handshake with that token, and removes only its own
-  descriptor during an orderly shutdown.
-- A separately packaged `ReweaveNativeHost.exe` implements bounded native-message framing,
-  reads the private runtime descriptor, probes the authenticated loopback handshake, forwards
-  bounded capture and Context assembly requests to authenticated app endpoints, and returns only
-  bounded status, capture summaries, or validated insertion text without exposing the token,
-  port, current chat, draft, or full Context Item records.
-- Development registration scripts create and remove the exact per-user Chrome and Edge Native
-  Messaging registry entries and restrict the host manifest to explicit extension origins.
-- First-run onboarding now presents whole-export backfill as the recommended faster route without
-  making it mandatory. A user may skip directly to the empty Context surface and new extension
-  capture, while the existing ZIP, JSON, and local-path Import screen remains available.
-- The onboarding and Settings copy explain that capture, browsing, and search work without an API
-  key, pending Context analysis starts automatically after a successful saved BYOK connection, and
-  the current development extension requires an unpacked Chrome or Edge load plus Native Messaging
-  registration rather than claiming automatic installation.
-- Onboarding completion keeps the existing durable local-storage key so existing users do not see
-  the wizard again. Step transitions move keyboard focus to the new heading; desktop and 375-pixel
-  layouts provide internal scrolling, 44-pixel core actions, and no horizontal overflow.
-
-The preceding list describes current software, not completion of the Context Library product contract.
+- Local ChatGPT/Claude whole-conversation Save and export Import persist sources before analysis.
+  Original-message keyword/optional local semantic search and source removal remain available.
+- Durable analysis queues now include explicit reanalysis generations, saved provider selection,
+  idle/batch scheduling, daily attempt/token reservations, pause, retry and restart recovery.
+- The complete-source analysis work adds bounded sequential segments, normalized checkpoints,
+  hierarchical Brief synthesis, coverage metadata and explicit incomplete states. Semantic
+  reconciliation uses bounded compatible candidates and preserves user corrections. Actual key
+  sends share invocation/run caps; restoring matching runs cannot rewind spent calls (DEC-029/030).
+- Schema v7 stores canonical linked spaces, aliases, rename/merge revisions, source-grounded
+  Briefs and Context Items, distinct observed/inferred/suggested claims, rationale, confidence,
+  sensitivity, source snapshots, item links and immutable user correction/undo history.
+- Progressive local Context retrieval scopes before ranking, broadens low-confidence candidates,
+  expands links, and supports global keyword/optional cached semantic matching. Both Context and
+  original-source search support linked-space and item-type filters with bidirectional evidence
+  navigation. No local embedding model was downloaded during this task.
+- Explicit Use records corrected destination intent; Work/Client/Shared/unknown use requires
+  allowed scopes. Version-bound sensitive preview/confirmation is separate, expiring and one-use.
+  Current chat and draft remain transient; the extension preserves the draft and never submits.
+- Exception Review identifies sensitive inference, ambiguity, changed evidence, low confidence,
+  stale confidence and unresolved relationships. Dismissal does not authorize external Use.
+  Version-bound resolution and undo preserve the original content and source evidence.
+- Reading Room Home, Explore, Sources, global Search, Import, Settings, onboarding, queue,
+  correction, sharing and extension surfaces use the selected shared ivory/sage design. Graph
+  and Review are auxiliary Explore views. Standalone Ask Archive and Memory Audit destinations
+  are removed while their historical stored data and internal APIs remain available.
+- Local Graph reads canonical items, spaces and links. Sharing excludes private/sensitive scopes,
+  starts with generic labels, and exports only an explicit expiring preview. The generated PNG
+  was decoded and inspected in the isolated browser; native file saving remains a manual check.
+- Password-encrypted complete backups preserve source/Context/queue/settings data and exclude
+  protected credentials. Exclusive restore validates staged data, uses a recovery journal,
+  disconnects profiles and reports committed-but-restart-required recovery accurately. Plaintext
+  backup/restore HTTP routes are retired. Derived Library deletion is separate from source removal.
+- Loopback Host/exact Origin validation, maintenance leases, memory-only verification credentials,
+  bounded headless lifetime and owned runtime-descriptor cleanup protect isolated operation.
+  User-triggered attachment saving is explicitly enabled in the native WebView2 launcher.
+- Redacted diagnostics expose allowlisted counts and runtime versions without text, source/item
+  identity, local paths, provider addresses, personal instructions or keys.
 
 ## In progress
+
+- Full accepted Windows product completion is authorized; detailed preserved scope and staged
+  coverage live in `docs/execution/2026-09-09-product-completion.md`.
+- TASK-005 through TASK-008 and TASK-010 have their isolated implementation evidence.
+  TASK-009 and TASK-011 remain open for native Save File acceptance; phase exits and actual
+  usefulness remain open. TASK-012 is the single next acceptance task under DEC-026.
 
 - TASK-000 through TASK-004 are integrated and verified through the required repository delivery
   loop.
@@ -162,10 +77,53 @@ The preceding list describes current software, not completion of the Context Lib
   and non-blocking page-lifetime unsaved reminders.
 - TASK-004 is complete across durable queue, automatic local scheduler, and optional-backfill
   first-run onboarding slices.
-- PHASE-002 is blocked at its documented entry gate because the product owner's default local
-  archive currently has no real conversations or Context baseline evidence.
+- The former PHASE-002 real-data entry prerequisite is superseded by DEC-026. Actual private
+  dogfooding remains unverified and mandatory in TASK-012; no current user archive was inspected.
 
 ## Verification evidence
+
+### Current execution, 2026-09-09 through 2026-09-10
+
+- Read instructions, canonical records, the selected A image and supplied design documents.
+  Git was clean at 2303357 before creating the feature branch. No owner archive was inspected.
+- Original audit findings remain in `docs/verification/2026-09-10/product-scope-audit.md` as a
+  historical snapshot. Reanalysis, complete-source coverage, semantic relationships, original
+  source filters and idle/batch scheduling now have implementation and regression evidence.
+  Independent extraction/integration reviews reproduced and closed the recorded scope,
+  source identity, consent lifetime, call accounting, restore and owner/shutdown defects.
+- Latest completed frontend run: 102 tests passed. TypeScript check passed. Actual browser QA
+  used real local HTTP with isolated synthetic data; source correction conflict/save/undo,
+  space rename/merge, search/evidence navigation, Review dismissal, graph navigation/redaction,
+  encrypted preview/restore and redacted diagnostics passed the documented scenarios.
+- Browser evidence is `docs/verification/2026-09-10/browser-qa-report.md` and its linked captures.
+  Matched Home passed at 1280x720 and 375x812. The source-drawer Escape focus defect was fixed
+  and rechecked against the exact opener. Headless download completion was canceled even for an
+  independent control, so file writing is not claimed from generated Blob/PNG evidence.
+  Headless browser zoom keys did not change zoom; 640x360 layout reflow was verified instead.
+- A separate native launcher defect was found in installed pywebview: downloads default off.
+  The launcher now enables user-triggered Save File dialogs before window creation. A mocked
+  launcher contract and isolated runtime/backup/origin suite passed 73 tests; no native dialog
+  was opened. Real Windows Save File interaction remains a separate owner check.
+- Python regression, frontend production-build and final installer evidence are recorded in
+  `docs/verification/2026-09-10/final-verification.md`, together with exact executable identities.
+  These are synthetic checks and packaging evidence, not real LLM quality or owner usefulness.
+- The final clean PyInstaller build succeeded. The two real executables passed framed Native
+  Messaging capture, no-key persistence, one loopback synthetic analysis, exact evidence, explicit
+  destination-safe Use, restart, repeated-Save idempotence and owned shutdown cleanup. The raw
+  privacy-safe result is `docs/verification/2026-09-10/packaged-runtime-final.json`.
+- Final core Python suite: 535 passed; separate distribution-helper suite: 13 passed. Frontend:
+  102 passed. The 50,343,040-byte final installer passed isolated install/uninstall, verification
+  of all 720 installed file hashes and unrelated-file preservation. It started no application,
+  changed no real registry or shortcut, and did not touch the owner Library.
+- No paid provider call, model download, user-browser action or Native Messaging registration
+  occurred. Browser-QA and packaged-test owned processes exited; no owner app was closed.
+- Strict-full validation passed with zero errors/warnings. A fresh-context reviewer recovered
+  the full product, priority values, DEC-026/027 interventions, implementation, constraints and
+  single TASK-012 acceptance path without an unanswered implementation question. Its independent
+  artifact hash check passed; it correctly kept real usefulness and Git integration outside its
+  reviewed evidence. See `docs/verification/2026-09-10/handoff-reconstruction.md`.
+
+All following "Fresh" subsection titles refer to their historical slices, not the current run.
 
 ### Fresh in the TASK-004 optional-backfill onboarding slice
 
@@ -526,51 +484,40 @@ These are historical merge records and were not rerun by the current documentati
 
 ## Drift and gaps
 
-- The accepted Product Spec replaces the historical AI Memory Control Plane and manual Memory Audit direction, but current code still exposes Memory Audit as a standalone surface.
-- The accepted product removes user-facing Ask Archive, but current code still implements and exposes it.
-- Conversation Brief and Context Item persistence, one-conversation extraction, durable
-  capture-enqueued work, automatic bounded scheduling, retry backoff, local usage estimates,
-  explicit retry, optional-backfill onboarding, backend analysis/read APIs, Context Home, Explorer,
-  and source-evidence navigation now exist. Full Core Self behavior, automatic routing, Knowledge
-  Graph, correction learning, and exception Review do not yet exist.
-- The local whole-conversation capture contract, secure Chrome/Edge extension bridge, ChatGPT and
-  Claude DOM adapters, explicit Save and Use paths, page-lifetime unsaved reminders, authenticated
-  Context assembly, and on-request draft insertion and refresh now exist. Destination correction,
-  non-private allowed-scope selection, and sensitive-use confirmation remain later trust work in
-  TASK-007.
-- Current Insight Reports have not yet been migrated into Conversation Brief and analysis-history behavior.
-- Current archive search has not yet been reframed or connected as Sources / Evidence Search for Context.
-- Current archive backup and removal do not yet satisfy the Context Library's encrypted
-  version backup and separate derived-context deletion contract.
-- The README and AGENTS.md project overview correctly describe the software that exists now; they must not claim future Context behavior until it is implemented.
+- Implementation, generated-file evidence, isolated installation, normal native interaction and
+  owner usefulness are distinct. No confirmed P1/P2 finding remains in the bounded independent
+  extraction and integration reviews; that statement is not a guarantee against unknown defects.
+- Native Save File completion and actual desktop 200% zoom have not been exercised because
+  current authorization excludes visible windows and physical desktop interaction.
+- Historical Insight Reports and Memory Audit records are preserved internally rather than
+  retroactively relabeled as Conversation Briefs. Newly requested analysis uses the Context path.
+- Actual extraction quality, useful cross-chat reuse and reduced repeated explanation remain
+  unverified until the selected real-data acceptance in TASK-012. Synthetic tests cannot close it.
+- The English local beta/privacy/support handoff is in `docs/release/`. GitHub Issues was enabled
+  and Discussions disabled in the read-only 2026-09-10 snapshot. Public support enablement,
+  signing/distribution, v1 scope freeze, synchronization timing and publication remain owner decisions.
 
 ## Blockers
 
-- PHASE-002 entry is blocked because the product owner's default local archive contains zero
-  conversations and has no real Context Brief, Context Item, retrieval, prompt, correction, or API
-  usage baseline. A future task may inspect privacy-safe counts and outcomes only; raw content must
-  remain local unless the user explicitly expands scope.
+- No implementation blocker remains from the old real-data prerequisite (DEC-026). Final
+  completion still requires selected real data, approved provider costs/transmission, and the
+  owner's real-use judgment. These approvals have not yet been requested or granted.
+- Native installation and real account/browser interaction require separate user permission or
+  a prepared manual check; no desktop interaction is authorized.
 - The public v1 scope freeze and encrypted-synchronization timing are intentionally deferred to PHASE-004 and do not block the current phase.
 
 ## Next task
 
-- TASK-005: Implement linked spaces, Core Self, inferred values and tacit knowledge, automatic
-  routing, and visible provenance.
-- Current bounded entry gate: Before TASK-005 implementation, use the product owner's real local
-  archive to prove the PHASE-002 entry criteria. Import or explicitly capture at least one supported
-  real conversation, connect a saved provider, let its queued analysis produce a Conversation Brief
-  and any source-supported Context Items, then complete one explicit Use Reweave round-trip.
-- Acceptance: The default local database is upgraded without losing source data; at least one real
-  source remains browseable and searchable; one durable Brief exists after automatic queued
-  analysis; zero Context Items is accepted when the source supports none; explicit Use either
-  inserts bounded source-linked Context or reports unavailable Context accurately; and baseline
-  retrieval misses, corrections, provider usage, and latency are recorded only as privacy-safe
-  counts or outcomes without copying raw conversation or Context content into the repository.
-- Verify: Re-observe the default database and saved-profile connection without exposing secrets,
-  run one product-owner Save or Import through automatic analysis and restart, run one Use flow in a
-  supported private ChatGPT or Claude conversation, record privacy-safe baseline evidence, and then
-  re-evaluate whether PHASE-002 can become active before starting the first TASK-005 implementation
-  slice.
+- TASK-012: Run the selected real-owner round-trip and close native acceptance before judging
+  sustained usefulness. DEC-026 allows this acceptance work to resolve earlier open phase gates.
+- Acceptance: Owner-selected Save/Import, explicitly approved provider/model/data/call/cost/stop
+  bounds, real analysis, app restart, faithful source inspection and explicit draft-preserving Use.
+  The owner judges reduced repeated explanation and a useful graph relationship. Verify normal
+  installation/browser registration, native backup/PNG/diagnostic saving and 200% zoom through
+  owner operation or separately authorized assistance. Keep source text and credentials private.
+- Verify: Follow `docs/verification/2026-09-10/owner-acceptance.md`; record privacy-safe outcomes,
+  real latency/cost, misses/corrections and native results. Fix evidenced defects in the same task,
+  repeat relevant checks and rebuild before new delivery. Synthetic evidence never closes this task.
 
 ## Resume checklist
 

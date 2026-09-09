@@ -1,0 +1,21 @@
+{
+  "1280": {
+    "dimensions": [
+      1280,
+      720
+    ],
+    "difference_bounds": [
+      1246,
+      177,
+      1248,
+      181
+    ]
+  },
+  "375": {
+    "dimensions": [
+      375,
+      812
+    ],
+    "difference_bounds": null
+  }
+}

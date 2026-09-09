@@ -1,0 +1,44 @@
+{
+  "disconnect_between_jobs": {
+    "runtime_resolutions": [
+      true
+    ],
+    "submissions": [
+      {
+        "connected_when_submitted": true,
+        "same_captured_provider": true
+      },
+      {
+        "connected_when_submitted": false,
+        "same_captured_provider": true
+      },
+      {
+        "connected_when_submitted": false,
+        "same_captured_provider": true
+      }
+    ]
+  },
+  "restore_daily_allowance": {
+    "before_restore": {
+      "day": "2026-09-09",
+      "reserved_attempts": 2,
+      "reserved_tokens": 2000,
+      "remaining_attempts": 0,
+      "remaining_tokens": 8000,
+      "currency_cost": null,
+      "explanation": "Conservative reservations include all possible key attempts and maximum output. They are not billed usage or a currency-cost estimate. Reset: 00:00 UTC."
+    },
+    "after_restore": {
+      "day": "2026-09-09",
+      "reserved_attempts": 0,
+      "reserved_tokens": 0,
+      "remaining_attempts": 2,
+      "remaining_tokens": 10000,
+      "currency_cost": null,
+      "explanation": "Conservative reservations include all possible key attempts and maximum output. They are not billed usage or a currency-cost estimate. Reset: 00:00 UTC."
+    },
+    "additional_attempts_reserved": 2,
+    "observed_total_reserved_today": 4,
+    "configured_limit": 2
+  }
+}

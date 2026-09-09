@@ -1,0 +1,10 @@
+{
+  "change": "Enable downloads only in the owned isolated QA browser",
+  "browserContextId": "8D3777D79268B881CEA73F006EBA0C6E",
+  "contexts": {
+    "browserContextIds": [],
+    "defaultBrowserContextId": "8D3777D79268B881CEA73F006EBA0C6E"
+  },
+  "result": {},
+  "allowedDomainsUnchanged": true
+}
