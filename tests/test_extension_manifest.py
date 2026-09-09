@@ -45,7 +45,7 @@ def test_extension_reads_provider_pages_only_in_explicit_save_or_use_handlers():
     assert "chrome.tabs" not in popup
     assert "chrome.scripting" not in popup
     assert 'save.addEventListener("click", saveConversation)' in popup
-    assert 'useContext.addEventListener("click", useReweave)' in popup
+    assert 'useContext.addEventListener("click", () => useReweave())' in popup
     assert "checkAvailability();" in popup
 
 
@@ -58,7 +58,8 @@ def test_popup_exposes_accessible_actionable_states():
     assert '<button id="use" type="button"' in html
     assert '<button id="retry" class="secondary" type="button"' in html
     assert "min-height: 44px" in css
-    assert "prefers-color-scheme: dark" in css
+    assert "color-scheme: light" in css
+    assert "#f7f6f2" in css
     assert "prefers-reduced-motion: reduce" in css
 
 

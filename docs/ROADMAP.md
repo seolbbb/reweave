@@ -3,7 +3,7 @@
 ## Document control
 
 - Status: active
-- Last reviewed: 2026-07-22
+- Last reviewed: 2026-09-10
 - Working language: English
 
 ## Status vocabulary
@@ -17,7 +17,9 @@
 ## Current phase
 
 - Phase: PHASE-002
-- Outcome: Clear the real-archive entry gate, then harden personalization, trust, and retrieval.
+- Outcome: Complete linked personalization, trust, retrieval, and Reading Room flows using
+  isolated verification, then close native and real-owner acceptance through TASK-012.
+  DEC-026 permits this cross-phase acceptance work before later phases can be marked done.
 
 ## Phases
 
@@ -165,12 +167,13 @@ Tasks:
 
 ### PHASE-002 — Personalization, trust, and retrieval hardening
 
-- Status: blocked
+- Status: active
 - Outcome: Reweave can maintain a useful model of the user with little routine management while preventing scope leakage, confident mispersonalization, and retrieval blind spots.
 - Dependencies: PHASE-001.
-- Entry criteria: PHASE-001 works with the product owner's real archive and baseline quality evidence exists.
-  - The first end-to-end Context loop is usable with the product owner's real archive.
-  - Baseline retrieval, prompt, correction, and API-usage evidence exists.
+- Entry criteria: PHASE-001 implementation is available and current code is re-observed in an
+  isolated environment. DEC-026 supersedes the real-archive implementation prerequisite.
+  - Synthetic functional, UI, recovery, and safety verification may support implementation.
+  - Actual usefulness and the real Save-to-Use round-trip remain mandatory in TASK-012.
 - Exit criteria: Personalization, scope, retrieval, prompt, correction, Review, and backup contracts pass their regression and manual scenarios.
   - Core Self, Personal, Work, Projects, and Topics scopes support cross-links and automatic routing.
   - Values and tacit knowledge are inferred into a distinct visible area with evidence, confidence, and history.
@@ -181,22 +184,33 @@ Tasks:
   - Prompt versions pass extraction, grounding, useful-synthesis, prompt-injection, and scope-leakage regression tests.
   - Review contains exceptions only.
   - Encrypted local backup and complete restore pass.
-- Verification evidence: Entry is blocked. A read-only 2026-07-22 check found the product owner's
-  default local archive at schema version 2 with zero conversations and messages and no Context
-  schema, so the required real-archive and baseline-quality evidence does not exist yet. No raw
-  conversation content was read.
+- Verification evidence: Linked spaces, correction, trust, retrieval, complete-source analysis,
+  semantic reconciliation, Review and encrypted restore now have synthetic regression evidence.
+  Reading Room browser QA exercised real local HTTP and persisted corrections, links, source
+  navigation, redaction and restore. Fresh dual-executable build and framed Native Host
+  Save/analysis/restart/Use passed. Exact counts and artifact identities belong to the current
+  Project Status and `docs/verification/2026-09-10/` records. Native Save File completion and
+  actual model/usefulness acceptance remain in TASK-012; this phase is not yet marked done.
 
 Tasks:
 
-- [ ] TASK-005: Implement linked spaces, Core Self, inferred values and tacit knowledge, automatic routing, and visible provenance.
-  - Entry gate before implementation: Use at least one real product-owner conversation to verify
-    durable source capture or import, saved-provider automatic analysis, restart persistence, one
-    explicit Use round-trip, and privacy-safe baseline outcomes required by PHASE-002. Do not copy
-    raw source or Context content into repository evidence.
-- [ ] TASK-006: Implement correction precedence, version history, stale confidence, contradiction handling, merge review, and undo.
-- [ ] TASK-007: Implement destination trust, scope isolation, sensitive-use confirmation, risky-export warning, and exception Review.
-- [ ] TASK-008: Implement progressive global retrieval, graph expansion, full-library fallback, and the prompt/retrieval golden evaluation set.
+- [x] TASK-005: Implement linked spaces, Core Self, inferred values and tacit knowledge, automatic routing, and visible provenance.
+  - Acceptance: A selected imported or captured source enters durable analysis; evidence-backed
+    Briefs and zero or more items appear in Reading Room Home and Explore, with canonical linked
+    spaces, distinct sourced inference, safe Core Self routing, editable space names and preserved
+    corrections. Existing data survives migration. Sources and global search remain accessible.
+  - Verification: Isolated synthetic capture/import-to-analysis-to-restart API scenarios, grounded
+    routing and deduplication regressions, headless A layout/accessibility checks, frontend build,
+    fresh dual-executable PyInstaller build, packaged headless smoke, and strict-full documents.
+  - Enabling slices: credential-safe/headless runtime, import analysis access, shared Reading Room
+    shell and source-first Home, then canonical routing/linking. Full subsequent tasks stay in scope.
+- [x] TASK-006: Implement correction precedence, version history, stale confidence, contradiction handling, merge review, and undo.
+- [x] TASK-007: Implement destination trust, scope isolation, sensitive-use confirmation, risky-export warning, and exception Review.
+- [x] TASK-008: Implement progressive global retrieval, graph expansion, full-library fallback, and the prompt/retrieval golden evaluation set.
 - [ ] TASK-009: Implement encrypted local backup, one-artifact restore, source removal without derived-context cascade, and separate Library deletion.
+  - Implementation and synthetic/browser restore verification complete. Native Save File
+    completion remains an owner-operated acceptance check in TASK-012; no data-loss defect is
+    currently known from the recorded checks. This checkbox stays open until that check passes.
 
 ### PHASE-003 — Knowledge Graph and privacy-safe sharing
 
@@ -212,12 +226,16 @@ Tasks:
   - The graph helps reveal at least one non-obvious relationship during dogfooding.
   - Sharing is local by default and exports only user-selected, redacted, previewed content.
   - Raw personal context and evidence cannot be shared by the default flow.
-- Verification evidence: Not available until the phase is done.
+- Verification evidence: Canonical graph navigation, privacy filtering, exact-preview consent,
+  responsive views and generated PNG bytes passed isolated API/browser checks. Actual native
+  image saving and a useful non-obvious relationship during dogfooding remain unverified.
 
 Tasks:
 
-- [ ] TASK-010: Implement the navigable Knowledge Graph on the canonical Context model.
+- [x] TASK-010: Implement the navigable Knowledge Graph on the canonical Context model.
 - [ ] TASK-011: Implement explicit scoped redaction, preview, and image export for privacy-safe graph sharing.
+  - Implemented and verified through actual redacted PNG generation/inspection. Native file
+    saving remains part of TASK-012. A rendered graph does not establish useful discovery.
 
 ### PHASE-004 — Completeness dogfooding and public beta preparation
 
@@ -239,8 +257,21 @@ Tasks:
 Tasks:
 
 - [ ] TASK-012: Run sustained product-owner dogfooding, record defects and protected decisions, and converge the full accepted flow.
+  - Current concrete acceptance task under DEC-026, including the remaining TASK-009/TASK-011
+    native file checks and PHASE-003 graph-value gate. Earlier phase checkboxes remain open until
+    their required evidence exists; this does not silently bypass the phase dependencies.
+  - Mandatory final gate (DEC-026): An explicitly selected real conversation must pass Save or
+    Import, approved provider analysis, restart persistence, source inspection, and explicit Use
+    in the next ChatGPT/Claude conversation. Record only privacy-safe outcomes, misses,
+    corrections, latency and usage. The owner must assess reduced repeated explanation and real
+    reuse; synthetic tests cannot complete this task. Request provider/model/data/call/cost/stop
+    approval only after preparatory work is ready. No paid call is currently authorized.
 - [ ] TASK-013: Resolve the public v1 scope freeze and encrypted-synchronization timing.
 - [ ] TASK-014: Prepare and verify the Windows and Chrome/Edge Public Beta release surfaces.
+  - Local per-user installer, unpacked extension and English privacy/support guides are prepared
+    with isolated verification. Normal owner installation, real browser registration, signing or
+    an explicitly accepted unsigned distribution route, and publication remain separate gates.
+    GitHub Issues is enabled; Discussions was disabled in the 2026-09-10 read-only snapshot.
 
 ## Future candidates
 

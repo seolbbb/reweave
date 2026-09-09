@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ArchiveRestore,
   ArrowLeft,
   ArrowRight,
   CalendarDays,
@@ -20,6 +19,8 @@ import {
   Trash2
 } from "lucide-react";
 import "./archiveManagement.css";
+import { AnalysisQueue, queueConversation } from "./AnalysisQueue";
+import { BackupManager } from "./BackupManager";
 
 export type ArchiveConversation = {
   id: string;
@@ -75,6 +76,7 @@ type LibraryViewProps = {
   onOpenConversation: (id: string) => void;
   onImport: () => void;
   onArchiveChanged: () => Promise<void>;
+  onOpenSettings?: () => void;
 };
 
 export function LibraryView({
@@ -82,7 +84,8 @@ export function LibraryView({
   sourceFacets,
   onOpenConversation,
   onImport,
-  onArchiveChanged
+  onArchiveChanged,
+  onOpenSettings
 }: LibraryViewProps) {
   const [page, setPage] = useState<ArchivePage>({ results: [], total: 0, offset: 0, limit: 50 });
   const [source, setSource] = useState("");
@@ -90,19 +93,27 @@ export function LibraryView({
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sort, setSort] = useState("newest");
+  const [offset, setOffset] = useState(0);
+  const requestSequence = useRef(0);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("Browse every conversation without knowing what to search for.");
   const [managementBusy, setManagementBusy] = useState(false);
 
   const loadLibrary = useCallback(async () => {
+    const sequence = ++requestSequence.current;
     setLoading(true);
     try {
-      const params = new URLSearchParams({ sort, limit: "50" });
+      const params = new URLSearchParams({ sort, limit: "50", offset: String(offset) });
       if (source) params.set("source", source);
       if (title.trim()) params.set("title", title.trim());
       if (dateFrom) params.set("date_from", dateFrom);
       if (dateTo) params.set("date_to", dateTo);
       const response = await request<ArchivePage>(`/api/library?${params.toString()}`);
+      if (sequence !== requestSequence.current) return;
+      if (offset > 0 && offset >= response.total) {
+        setOffset(Math.max(0, Math.floor((response.total - 1) / 50) * 50));
+        return;
+      }
       setPage(response);
       setNotice(
         response.total
@@ -110,11 +121,12 @@ export function LibraryView({
           : "No conversations match these filters."
       );
     } catch (error) {
+      if (sequence !== requestSequence.current) return;
       setNotice(errorMessage(error, "Could not load the conversation library."));
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [source, title, dateFrom, dateTo, sort]);
+  }, [source, title, dateFrom, dateTo, sort, offset]);
 
   useEffect(() => {
     void loadLibrary();
@@ -123,7 +135,7 @@ export function LibraryView({
   async function removeConversation(conversation: ArchiveConversation) {
     if (
       !window.confirm(
-        `Permanently delete “${conversation.title}”? Its messages, search index, local embeddings, and related reports will also be removed.`
+        `Permanently delete the original “${conversation.title}” and its messages, search index, local embeddings, and related reports? Derived Context Items, history, and compact evidence stay in your Context Library. This source deletion cannot be undone.`
       )
     ) return;
     setManagementBusy(true);
@@ -144,7 +156,7 @@ export function LibraryView({
     const count = sourceFacets.find((facet) => facet.source === sourceName)?.conversations ?? 0;
     if (
       !window.confirm(
-        `Permanently delete all ${count.toLocaleString()} ${sourceName} conversations and related reports? This cannot be undone.`
+        `Permanently delete all ${count.toLocaleString()} ${sourceName} source conversations and related reports? Derived Context Items and compact evidence remain. This source deletion cannot be undone.`
       )
     ) return;
     setManagementBusy(true);
@@ -161,32 +173,14 @@ export function LibraryView({
     }
   }
 
-  async function restoreBackup(file: File) {
-    if (
-      !window.confirm(
-        "Restore this archive backup? Reweave will save an automatic safety copy of the current archive first."
-      )
-    ) return;
+  async function analyzeConversation(conversation: ArchiveConversation) {
     setManagementBusy(true);
-    setNotice("Validating and restoring the archive backup...");
     try {
-      const body = new FormData();
-      body.append("file", file);
-      const result = await request<{
-        conversations: number;
-        messages: number;
-        reports: number;
-        safety_backup_path: string;
-      }>("/api/archive/restore", { method: "POST", body });
-      setNotice(
-        `Restored ${result.conversations.toLocaleString()} conversations and ${result.messages.toLocaleString()} messages. Safety copy: ${result.safety_backup_path}`
-      );
-      await Promise.all([loadLibrary(), onArchiveChanged()]);
+      await queueConversation(conversation.id);
+      setNotice(`“${conversation.title}” is in the durable analysis queue. Without a key it stays saved until you connect a provider.`);
     } catch (error) {
-      setNotice(errorMessage(error, "Could not restore the archive backup."));
-    } finally {
-      setManagementBusy(false);
-    }
+      setNotice(errorMessage(error, "Could not queue this source for analysis."));
+    } finally { setManagementBusy(false); }
   }
 
   return (
@@ -194,7 +188,7 @@ export function LibraryView({
       <header className="pageHeader libraryHeader">
         <div>
           <span className="sectionLabel">Your local archive</span>
-          <h1>Conversation library</h1>
+          <h1>Sources</h1>
           <p>Browse by date or service, open the original thread, and control what remains stored.</p>
         </div>
         <button className="primaryButton" type="button" onClick={onImport}>
@@ -207,7 +201,7 @@ export function LibraryView({
         <div>
           <strong>Stored on this device</strong>
           <span>
-            Search and browsing stay local. Only selected source text is sent when you ask an AI provider or generate a report.
+            Search and browsing stay local. Imported and explicitly saved conversations are queued for your selected AI provider, within your analysis allowance.
           </span>
         </div>
         <small title={paths?.db_path}>{paths?.db_path ?? "Loading archive location..."}</small>
@@ -222,11 +216,11 @@ export function LibraryView({
       >
         <label>
           <span>Title</span>
-          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Filter conversation titles" />
+          <input value={title} onChange={(event) => { setTitle(event.target.value); setOffset(0); }} placeholder="Filter conversation titles" />
         </label>
         <label>
           <span>Service</span>
-          <select value={source} onChange={(event) => setSource(event.target.value)}>
+          <select value={source} onChange={(event) => { setSource(event.target.value); setOffset(0); }}>
             <option value="">All services</option>
             <option value="chatgpt">ChatGPT</option>
             <option value="claude">Claude</option>
@@ -234,15 +228,15 @@ export function LibraryView({
         </label>
         <label>
           <span>From</span>
-          <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+          <input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setOffset(0); }} />
         </label>
         <label>
           <span>To</span>
-          <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+          <input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setOffset(0); }} />
         </label>
         <label>
           <span>Sort</span>
-          <select value={sort} onChange={(event) => setSort(event.target.value)}>
+          <select value={sort} onChange={(event) => { setSort(event.target.value); setOffset(0); }}>
             <option value="newest">Recently updated</option>
             <option value="oldest">Oldest first</option>
             <option value="messages">Most messages</option>
@@ -281,6 +275,10 @@ export function LibraryView({
               </span>
               <ArrowRight size={17} />
             </button>
+            <button className="secondaryButton libraryAnalyze" type="button" disabled={managementBusy}
+              onClick={() => void analyzeConversation(conversation)} aria-label={`Analyze ${conversation.title}`}>
+              Analyze
+            </button>
             <button
               className="libraryDelete"
               type="button"
@@ -294,6 +292,16 @@ export function LibraryView({
         ))}
       </div>
 
+      {page.total > 50 && <nav className="libraryPagination" aria-label="Source pages">
+        <button className="secondaryButton" type="button" disabled={loading || offset === 0}
+          onClick={() => setOffset((value) => Math.max(0, value - 50))}><ArrowLeft size={16} /> Previous</button>
+        <span>{offset + 1}–{Math.min(offset + page.results.length, page.total)} of {page.total.toLocaleString()} sources</span>
+        <button className="secondaryButton" type="button" disabled={loading || offset + page.results.length >= page.total}
+          onClick={() => setOffset((value) => value + 50)}>Next <ArrowRight size={16} /></button>
+      </nav>}
+
+      <AnalysisQueue onOpenSource={onOpenConversation} onOpenSettings={onOpenSettings} />
+
       <section className="archiveManagementPanel">
         <header>
           <div>
@@ -303,36 +311,11 @@ export function LibraryView({
           {managementBusy && <Loader2 className="spin" size={18} />}
         </header>
         <div className="archiveManagementGrid">
-          <div className="managementCard">
-            <DatabaseBackup size={21} />
-            <h3>Download backup</h3>
-            <p>Save a consistent copy of conversations, search data, and reports.</p>
-            <a className="secondaryButton" href="/api/archive/backup" download>
-              <DatabaseBackup size={15} /> Download .sqlite3
-            </a>
-          </div>
-          <div className="managementCard">
-            <ArchiveRestore size={21} />
-            <h3>Restore backup</h3>
-            <p>The current archive is backed up automatically before replacement.</p>
-            <label className="secondaryButton filePicker">
-              <ArchiveRestore size={15} /> Choose backup
-              <input
-                type="file"
-                accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3"
-                disabled={managementBusy}
-                onChange={(event) => {
-                  const file = event.currentTarget.files?.[0];
-                  if (file) void restoreBackup(file);
-                  event.currentTarget.value = "";
-                }}
-              />
-            </label>
-          </div>
+          <BackupManager onRestored={async () => { await Promise.all([loadLibrary(), onArchiveChanged()]); }} />
           <div className="managementCard dangerManagement">
             <Trash2 size={21} />
             <h3>Delete by service</h3>
-            <p>Removes source conversations, indexes, embeddings, and related reports.</p>
+            <p>Removes original conversations, indexes, embeddings, and related reports. Derived Context Items, history, and compact evidence remain.</p>
             <div>
               {sourceFacets.map((facet) => (
                 <button

@@ -1,0 +1,16 @@
+.contextSearchResults { padding: 24px; margin: 24px 0; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px; }
+.contextSearchResults header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.contextSearchResults h2 { margin: 5px 0 12px; font-size: 21px; }
+.contextSearchFilters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 12px 0; }
+.contextSearchFilters label { display: grid; gap: 6px; max-width: 100%; }
+.contextSearchFilters select { min-height: 44px; max-width: 100%; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); color: inherit; font: inherit; padding: 8px; }
+.contextSearchResults p, .contextSearchResults small { color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.contextSearchResults ul, .sourceContextLinks ul { list-style: none; margin: 0; padding: 0; }
+.contextSearchResults li { padding: 18px 0; border-top: 1px solid var(--color-border); }
+.contextSearchResults li p { margin: 6px 0; font-size: 14px; }
+.contextSearchItem { display: flex; align-items: start; justify-content: space-between; gap: 12px; text-align: left; color: var(--color-accent); background: transparent; border: 0; min-height: 44px; padding: 5px 0; width: 100%; font: inherit; line-height: 1.5; overflow-wrap: anywhere; cursor: pointer; }
+.contextSearchItem svg { flex-shrink: 0; margin-top: 4px; }
+.sourceContextLinks { margin: 12px 24px; padding: 12px; border: 1px solid var(--color-border); border-radius: 8px; }
+.sourceContextLinks summary { cursor: pointer; min-height: 44px; display: list-item; padding: 8px; }
+.sourceContextLinks button { min-height: 44px; background: transparent; border: 0; color: var(--color-accent); text-align: left; font: inherit; padding: 10px 5px; overflow-wrap: anywhere; cursor: pointer; }
+@media (max-width: 600px) { .contextSearchResults { padding: 16px; } .contextSearchResults header { flex-direction: column; gap: 0; } .sourceContextLinks { margin: 12px; } }

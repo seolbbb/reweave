@@ -224,7 +224,8 @@ The following entries record the current accepted product direction.
 - Options considered: Universal context, strict isolation everywhere, manual scope choice, or inferred trust zones with conservative shared behavior.
 - Decision: Core Self applies safe general preferences broadly; private AI chats may use relevant cross-space context; Work, Client, Shared, and unknown environments use allowed scope only; sensitive inference requires confirmation before external use.
 - Consequences: Scope is inferred and correction is remembered. Risky export warns only when needed. Removing a full source does not cascade to derived Context, which keeps compact evidence and is deleted separately.
-- Implementation evidence: Explicit Use accepts the private cross-space policy only from canonical
+- Historical implementation evidence (superseded by DEC-028): Explicit Use accepted the private
+  cross-space policy from canonical
   signed-in ChatGPT and Claude conversation URLs. The local assembler still excludes sensitive,
   inactive, and irrelevant items; non-private destinations still require concrete allowed scopes,
   and shared or unknown browser URLs fail before any page read or Context request.
@@ -308,7 +309,7 @@ The following entries record the current accepted product direction.
 
 ### DEC-019 — Validate by product-owner dogfooding before Public Beta
 
-- Status: accepted
+- Status: superseded
 - Date: 2026-07-21
 - Initiated by: User
 - Context: The product owner intends to use Reweave personally until it feels good enough to publish and does not want an external cohort or numerical release gate.
@@ -319,7 +320,7 @@ The following entries record the current accepted product direction.
 - Consequences: The former 8–10 participant Memory Audit gate is retired. GitHub Issues and Discussions are the initial support channels. The v1 scope freeze and encrypted-sync timing remain deferred to public-release preparation.
 - Reconsider when: External evidence is required for a commercial, safety, or distribution decision, or personal use cannot represent the intended target workflow.
 - Supersedes: DEC-006
-- Superseded by: None
+- Superseded by: DEC-026
 
 ### DEC-020 — Split the canonical product record into four documents
 
@@ -462,5 +463,153 @@ The following entries record the current accepted product direction.
 - Reconsider when: Browser action or injected-script lifetimes change, structural provider DOM
   signals become unreliable, or dogfooding shows that a 30-second quiet interval is too early or
   too late.
+- Supersedes: None
+- Superseded by: None
+
+### DEC-026 — Keep real-use acceptance mandatory while allowing isolated implementation
+
+- Status: accepted
+- Date: 2026-09-09
+- Initiated by: User
+- Context: The prior PHASE-002/TASK-005 entry gate stopped all later implementation until
+  real-owner data and a paid provider round-trip existed, leaving known approved scope missing.
+- User intent/value protected: Finish the full useful product without weakening privacy, cost
+  approval, source grounding, or the owner's final judgment of actual everyday value.
+- Intervention: The owner explicitly moved real-data validation from implementation prerequisite
+  to mandatory final acceptance and authorized continued synthetic development and verification.
+- Options considered: Keep the entry blockade; call synthetic tests actual usefulness; or build
+  safely in isolation and retain an explicit final real-use gate.
+- Decision: Choose isolated implementation with a mandatory TASK-012 real Save/Import, approved
+  analysis, restart, source inspection and explicit Use round-trip. Preserve all approved scope.
+- Consequences: PHASE-002 becomes active; TASK-005 through TASK-011 and release preparation may
+  proceed with evidence appropriate to their claims. Synthetic evidence never completes TASK-012.
+  Selected real data and paid calls require prior model/data/call/cost/stop-rule approval. Never
+  expose keys or raw content. No user desktop, clipboard, profile, registry, or visible-window
+  automation is authorized. Only isolated background verification and owned processes are allowed.
+  DEC-019's owner-dogfooding judgment and deferred public-release decisions remain in force.
+- Reconsider when: The owner changes acceptance or isolated work would require a new privacy,
+  cost, or external-effect commitment. Do not restore the old implementation block implicitly.
+- Supersedes: DEC-019
+- Superseded by: None
+
+### DEC-027 — Implement the selected Reading Room across the full product
+
+- Status: accepted
+- Date: 2026-09-09
+- Initiated by: User
+- Context: The existing seven destinations, oversized headers and empty grids obscure reading;
+  Ask Archive and Memory Audit remain visible despite DEC-017. The owner selected A from three
+  image-backed directions and explicitly authorized implementation inside the full product Goal.
+- User intent/value protected: A readable library with nearby evidence and less navigation and
+  repeated explanation, while preserving stored data and explicit Save/Use trust boundaries.
+- Intervention: Implement A without reopening A/B/C selection, using ui-ux-pro-max and the
+  supplied image, master, page rules and tokens; written typography corrects image artifacts.
+- Options considered: Reading Room, Focus Workspace, Connected Canvas. The owner selected A.
+- Decision: Adopt ivory/sage semantic tokens, offline sans-serif body, short serif headings,
+  document-plus-companion Home, efficient Explore, Sources, persistent Search, footer Settings,
+  explicit Import, auxiliary Graph and exceptional Review. Implement actual data/components.
+- Consequences: All frontend, onboarding, queue, recovery, correction, privacy, backup, settings
+  and extension surfaces share the design. Retire obsolete navigation while preserving source,
+  report and audit data. Compare matched synthetic data/viewports; never use mockups as runtime
+  or user-value evidence. The preserved design lives in `docs/design/reading-room/`.
+- Reconsider when: Actual use reveals reading or discovery problems that require a documented
+  revision; routine responsive and accessibility corrections do not reopen the selected direction.
+- Supersedes: None
+- Superseded by: None
+
+### DEC-028 — Enforce destination intent and exclusive encrypted restore
+
+- Status: accepted
+- Date: 2026-09-10
+- Initiated by: Agent, implementing the approved privacy and durability contract
+- Context: The current extension inferred private trust from a provider URL; local API requests
+  lacked an Origin/Host boundary; legacy restore left plaintext safety copies and could race
+  background writes. A committed restore could also be mislabeled as failed after cleanup errors.
+- User intent/value protected: DEC-014 scope isolation, explicit sensitive Use, local data privacy,
+  source preservation, and accurate recovery state without disturbing the owner's desktop.
+- Intervention: Apply the full approved safety behavior during the authorized product completion.
+- Options considered: Keep URL-only trust and plaintext compatibility, hide old controls, or
+  replace the unsafe paths with explicit destination metadata and staged encrypted maintenance.
+- Decision: A supported URL establishes provider identity, not private intent. Remember explicit
+  conversation destination corrections; permit restricted scopes only from a user allowlist;
+  bind separate sensitive consent to item versions and the current request. Enforce loopback
+  Host and exact browser Origin before API parsing. Serialize backup/preview/restore against
+  active and queued work, recover before store initialization, and disconnect restored profiles.
+- Consequences: First-use destination uncertainty needs a choice, then ordinary approved private
+  Use remains automatic. Source text cannot grant permissions. Plaintext HTTP backup/restore
+  routes return 410; existing data and legacy internal tools remain. Post-commit recovery errors
+  report restored/restart-required and block further operations. Graph sharing exports an exact
+  redacted preview with one-use, expiring consent; source titles and evidence never enter it.
+- Reconsider when: Real use shows avoidable consent friction or a supported environment can
+  provide a verifiable trust signal without weakening explicit user scope decisions.
+- Supersedes: None
+- Superseded by: None
+
+### DEC-029 — Cover complete sources and verify semantic relationships within limits
+
+- Status: accepted
+- Date: 2026-09-10
+- Initiated by: Agent, implementing the approved complete-analysis contract
+- Context: The scope audit found prompt-size truncation could omit a conversation's middle,
+  explicit reanalysis reused the prior Brief, and exact-text matching missed paraphrases while
+  identical wording from separate projects could acquire combined scopes.
+- User intent/value protected: Complete source coverage, honest partial progress, meaningful
+  connected Context, scope isolation, durable user corrections, and bounded provider costs.
+- Intervention: Fix the missing behavior before packaging or claiming full product readiness.
+- Options considered: Reject long inputs; silently truncate; or process all source pieces with
+  bounded sequential checkpoints and an explicit incomplete state. For relationships, compare
+  all Library contents or select a small scope-compatible candidate set.
+- Decision: Partition every original character with source offsets, checkpoint normalized derived
+  results, and synthesize Briefs hierarchically. Bind reuse to source, configuration, prompt and
+  explicit reanalysis generation. A source has at most eight calls per invocation and 256 calls
+  across the run, subject to the shared daily allowance. Never commit a complete Brief from an
+  incomplete run. After extraction, allow at most one relationship verification call with up to
+  twenty compact eligible candidate pairs. Broad scope labels or prompt instructions cannot
+  authorize unrelated private summaries. Revalidate candidate versions and scopes when saving.
+- Consequences: Verified high-confidence same-meaning matches can attach evidence while retaining
+  user corrections. Expansions, contradictions and uncertain candidates remain inspectable links
+  with rationale; unresolved contradictions cannot enter external Use. Identical wording in
+  distinct projects remains separate. Fresh automatic work waits thirty quiet seconds or three
+  sources; explicit analysis can start immediately. Committed checkpoints survive interruption,
+  encrypted restore and restart. An unknown crash between provider response and checkpoint commit
+  may require a repeated attempt; exactly-once billing is not promised. Oversized inputs and hard
+  call limits remain explicit errors. No paid or owner-data call is authorized by this decision.
+- Reconsider when: Real accepted usage demonstrates inaccurate linkage, excessive latency or an
+  insufficient bound; change the limit with cost evidence and preserve the privacy boundary.
+- Supersedes: None
+- Superseded by: None
+
+### DEC-030 — Keep provider consent, daily limits and Library ownership live
+
+- Status: accepted
+- Date: 2026-09-10
+- Initiated by: Agent, responding to independent integration review
+- Context: Synthetic review reproduced captured credentials surviving disconnect, an older
+  backup lowering same-day usage, multiple app/CLI owners bypassing maintenance exclusion,
+  and shutdown releasing ownership before a background writer finished. Export identity also
+  fell back to timestamps despite distinct explicit provider conversation IDs.
+- User intent/value protected: Stop unsent transmission after consent changes, honor visible
+  resource limits, preserve complete backups and source provenance, and avoid data loss.
+- Intervention: Close the reproduced defects before repository integration or final packaging.
+- Options considered: Document the races, disable concurrent features, or make the existing
+  request and lifetime boundaries enforce the intended behavior across all supported launchers.
+- Decision: Re-resolve the current saved provider for each queued source and validate connection
+  identity before every key attempt. On shutdown, prevent later requests, cancel queued work and
+  drain running workers before releasing the OS Library lock. All supported app and direct CLI
+  database commands use that lock before opening stores. Preserve same-day reservation maxima
+  and matching analysis-run call maxima in the staged restored database before its atomic
+  replacement. Run identities bind source, configuration and explicit generation; counts never
+  migrate to another generation or add unrelated runs. Use explicit provider IDs first;
+  timestamp fallback cannot merge distinct known identities or choose an ambiguous candidate.
+- Consequences: An already sent provider request may finish, but unsent continuation remains
+  queued. Closing may wait for the in-flight response and local worker cleanup; safety takes
+  precedence over an early lock release. Restore cannot reset the local current-day allowance
+  or reopen spent calls for a matching restored analysis run. Backup checkpoint content remains
+  unchanged; a fresh explicit analysis generation keeps its independent run limit.
+  Commands against a Library already open in the app return a clear busy message. A missing
+  API key is rejected before a queued job starts. Native user-triggered downloads enable the
+  Windows Save File dialog; isolated tests do not claim actual native dialog interaction.
+- Reconsider when: A future supported multi-process architecture can coordinate every writer and
+  restore transaction without losing these guarantees, or cancellation APIs improve safely.
 - Supersedes: None
 - Superseded by: None

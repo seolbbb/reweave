@@ -1,53 +1,69 @@
 # Reweave
 
-Reweave is a local archive and search app for exported ChatGPT and Claude
-conversations. It imports conversation exports into a local SQLite database,
-indexes messages with SQLite FTS5, and lets you search, inspect, export, and ask
-source-grounded questions without making the original export files the working
-surface. Optional multilingual semantic search is downloaded only when you
-enable it and runs entirely on the local device.
+Reweave is a local Windows Context Library for ChatGPT and Claude conversations.
+Save a whole web chat or import an export, then return to its decisions, lessons,
+projects and source evidence in the Reading Room. Explicit **Use Reweave** brings
+relevant allowed context into a later chat draft without submitting it.
 
-Insight generation is optional. When enabled, Reweave sends only the
-conversations you explicitly select to the configured model provider and stores
-the generated Markdown report in the same local archive database.
+The archive and Library stay on your device. A connected BYOK provider analyzes
+saved sources within a visible daily allowance; without a key, capture, browsing
+and keyword search still work. Optional multilingual semantic search runs locally
+and downloads its model only when you enable Smart search.
 
-## How It Works
+## How it works
 
-Reweave keeps the workflow intentionally local:
+1. Import a ChatGPT/Claude export, or use the extension's explicit Save action.
+2. Reweave stores the conversation before queued analysis begins.
+3. Analysis produces a Conversation Brief and supported Context Items with exact
+   evidence. Long sources use bounded resumable parts and show incomplete progress.
+4. Home highlights decisions and useful context. Explore follows linked spaces;
+   Search finds Context and original sources globally.
+5. Correct an item or its space when needed. Version history and undo preserve
+   your changes. Review is reserved for exceptions, ambiguity and conflicts.
+6. In a later supported web chat, write a request and choose Use. Confirm the
+   destination when needed; restricted scopes and sensitive material have separate
+   controls. Reweave adds a bounded context block before the unchanged draft.
 
-1. You provide exported ChatGPT or Claude data.
-2. Reweave normalizes supported conversations into a stable internal model.
-3. Conversations and messages are stored in SQLite.
-4. Message content and titles are indexed with SQLite FTS5.
-5. Exact, phrase, prefix, and substring candidates are fused into ranked results.
-6. Optional semantic chunks and embeddings stay in the same local archive.
-7. Search results retain conversation IDs, message indexes, roles, timestamps,
-   and source paths.
-8. Ask Archive retrieves its own evidence and rejects answers with missing or
-   invented citations.
-
-The archive database is append-friendly and idempotent for repeated imports.
-Native provider IDs preserve existing conversation links while changed titles,
-timestamps, and messages are updated. A shorter export never silently deletes
-messages already in the archive.
+Repeated imports and Saves are idempotent. Explicit reanalysis can use a new
+model while preserving user corrections. Removing a source keeps derived evidence
+snapshots; removing the derived Library is a separate explicit action.
 
 ## Features
 
-- Import ChatGPT and Claude JSON exports from directories, single JSON files,
-  or zip archives.
-- Search exact phrases and partial words with source, title, and date filters.
-- Choose `auto`, `keyword`, or optional local multilingual semantic search.
-- Ask the archive a question and open every citation at the exact source message.
-- View conversations in original message order with timestamps and source
-  metadata.
-- Export individual conversations or search-result dossiers as Markdown.
-- Run a local React/FastAPI browser app for drag-and-drop import, search,
-  selection, preview, and insight generation.
-- Run the same app in a native desktop window with `pywebview`.
-- Generate source-grounded insight reports with immediate progress, localized
-  output, rendered Markdown, and supporting-conversation links.
+- Shared Reading Room design across Home, Explore, Sources, Search, Import,
+  Settings, onboarding, correction, backup, Review and extension controls.
+- Source-grounded observed, inferred and suggested items, with linked projects,
+  topics, Core Self, Personal, Work and destination scopes.
+- Source and Context keyword/semantic search with space/type filters and
+  bidirectional navigation to the original message.
+- Versioned corrections, space rename/merge, relationship rationale, confidence
+  decay, exception Review and explicit undo.
+- Scope-aware Use with expiring sensitive consent, draft preservation, duplicate
+  block replacement and no automatic submission or conversation capture.
+- Local relationship Graph and explicitly previewed, redacted PNG sharing.
+- Encrypted complete Library backup/restore, disconnected restored credentials,
+  and redacted diagnostic export.
 
-## Install
+The current completion evidence and remaining owner acceptance are recorded in
+[Project Status](docs/PROJECT_STATUS.md). Automated or synthetic verification does
+not establish personal usefulness. The [Product Spec](docs/PRODUCT_SPEC.md) and
+[Roadmap](docs/ROADMAP.md) define the full accepted scope.
+
+## Windows package
+
+Build the desktop bundle with `packaging/Reweave.spec`, then run
+`scripts/build_windows_installer.py` to produce `dist/Reweave-Setup.exe`.
+The per-user installer includes both executables and the unpacked extension.
+It does not launch the app, enable automatic startup or register browser access.
+See [Windows installation](packaging/installer/README.md) for the separate
+Chrome/Edge registration step, safe update/removal and isolated verification.
+
+Windows Save File and real browser-account checks are separate from headless
+package tests. Current limits and final acceptance are in Project Status.
+The [beta preparation guide](docs/release/README.md) records installation, privacy,
+public support boundaries and the owner decisions required before publication.
+
+## Development install
 
 Reweave requires Python 3.11 or newer. The development workflow uses
 [`uv`](https://docs.astral.sh/uv/).
@@ -105,7 +121,7 @@ Practical examples:
 - Use `semantic` mainly to isolate meaning-based results while evaluating or
   debugging retrieval. For everyday use, `auto` is usually safer.
 
-On the current 32-query Korean and English golden set, hybrid `auto` improved
+On the historical 32-query Korean and English archive golden set, hybrid `auto` improved
 Recall@10 from `0.3438` to `0.9688` while preserving all exact-query hits. On a
 50,000-message archive, measured p95 latency was `162 ms` for keyword and
 `717 ms` for warm hybrid search. These are reference measurements from one
@@ -120,7 +136,7 @@ indexes only missing or changed chunks:
 uv run reweave index --db ./reweave.db
 ```
 
-Ask a source-grounded question using the configured BYOK provider:
+Optional legacy CLI command for a source-grounded answer using the configured BYOK provider:
 
 ```bash
 uv run reweave ask "How did I decide to structure my notes?" --mode auto --db ./reweave.db
@@ -158,19 +174,13 @@ uv run reweave app --db ./reweave.db
 
 Open `http://127.0.0.1:8765`.
 
-The web app supports:
-
-- Drag-and-drop import for `.zip` and `.json` exports.
-- Keyword, semantic, or automatic hybrid search with provider, title, and date filters.
-- A document-style Ask Archive answer with verified, clickable source citations.
-- Opt-in Smart search setup, progress, rebuild, index deletion, and model deletion.
-- Grouped conversation results with source excerpts.
-- Conversation preview in original message order.
-- Multi-select conversations for insight generation.
-- LLM settings for provider, model, API key, base URL, context size, and
-  temperature.
-- Reading generated insights in a structured report workspace.
-- Copying or downloading generated insight Markdown.
+The web app provides the same Reading Room and local Library flows as the desktop
+app. Context activity contains provider allowance, pause/retry controls and the
+active versioned prompt. Settings manages BYOK profiles and optional Smart search.
+Sources retains JSON/ZIP import, original conversations and explicit source removal.
+Graph and exception Review are auxiliary Explore views. Legacy Ask Archive and
+Memory Audit remain internal/CLI compatibility components, with no standalone
+primary UI destination.
 
 If the frontend build is missing, `reweave app` still starts the API and prints
 a warning.
@@ -254,7 +264,13 @@ The default CLI database path is `./reweave.db`. The desktop app defaults to the
 platform-specific Reweave application data directory unless `--db` or
 `REWEAVE_DB` is provided.
 
-## Insight Generation
+One app or CLI command owns a Library at a time. Close the desktop app before
+running a direct CLI command against the same database. Shutdown waits for active
+writers before another process may open or restore that Library.
+
+## Legacy CLI insight reports
+
+Historical reports and APIs remain available for compatibility. New desktop analysis uses Conversation Briefs and Context Items.
 
 Insight reports are generated from conversations you select. Reweave detects the
 dominant Korean or English source language, explicitly requires that language in
@@ -269,9 +285,9 @@ the model prompt, and produces rendered Markdown with these sections:
 - `Source references`
 
 Important claims should include source references such as
-`[conversation_id#mIndex]`. The report UI turns these references into links to
-supporting messages. Multi-chunk source analysis runs concurrently before the
-final synthesis step.
+`[conversation_id#mIndex]`. These references identify supporting messages. The legacy report generator uses
+concurrent chunk analysis; the current Context pipeline uses bounded sequential
+checkpoints and preserves complete-source coverage.
 
 Supported providers:
 
@@ -284,13 +300,20 @@ Supported providers:
 
 OpenAI-compatible providers require a base URL.
 
-### Privacy Boundary
+### Privacy boundary
 
-Import, keyword search, semantic embedding, search, export, and browsing are
-local operations. The semantic model is downloaded only after the user enables
-Smart search and can be removed from Settings. LLM calls happen only when Ask
-Archive or insight generation is requested. Ask Archive sends only its retrieved
-evidence; insight generation sends only conversations selected by the user.
+Import, capture, browsing, keyword search, local semantic embeddings and Library
+management run locally. Smart search downloads a model only after an explicit
+setup action. A connected active BYOK profile enables queued source analysis;
+pause and daily attempt/token limits are visible in Context activity. Each call
+contains only its bounded source parts or compatible compact relationship
+candidates. Limits are conservative reservations, not a dollar spending guarantee.
+
+Production API keys live in the operating-system credential store. Encrypted
+backups exclude credentials and restore profiles disconnected. Exported diagnostics
+exclude raw text, local paths and provider secrets. Graph sharing starts with
+redacted generic labels and requires preview and confirmation. Use reads the current
+chat and draft only after the explicit action and never persists either input.
 
 ## Configuration
 

@@ -311,26 +311,20 @@ def test_api_deletes_conversation_and_entire_source(tmp_path, fixtures_dir):
     assert remaining["results"][0]["source"] == "claude"
 
 
-def test_api_backup_and_restore_round_trip(tmp_path, fixtures_dir):
+def test_plaintext_backup_endpoints_are_retired_without_touching_sources(tmp_path, fixtures_dir):
     db = tmp_path / "archive.db"
     ArchiveStore(db).import_directory(fixtures_dir)
     data_dir = tmp_path / "app-data"
     client = TestClient(create_app(db, data_dir=data_dir))
     backup_response = client.get("/api/archive/backup")
-    conversation_id = client.get("/api/library").json()["results"][0]["id"]
-    client.delete(f"/api/conversations/{conversation_id}")
-
     restore_response = client.post(
         "/api/archive/restore",
-        files={"file": ("reweave.sqlite3", backup_response.content, "application/vnd.sqlite3")},
+        files={"file": ("reweave.sqlite3", b"not a backup", "application/vnd.sqlite3")},
     )
-
-    assert backup_response.status_code == 200
-    assert "attachment" in backup_response.headers["content-disposition"]
-    assert restore_response.status_code == 200
-    assert restore_response.json()["conversations"] == 4
+    assert backup_response.status_code == 410
+    assert restore_response.status_code == 410
     assert client.get("/api/library").json()["total"] == 4
-    assert list((data_dir / "backups").glob("reweave-before-restore-*.sqlite3"))
+    assert not list(data_dir.rglob("*.sqlite3"))
 
 
 def test_api_import(tmp_path, fixtures_dir):

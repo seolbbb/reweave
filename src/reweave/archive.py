@@ -7,6 +7,8 @@ import re
 import shutil
 import sqlite3
 import zipfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -17,6 +19,7 @@ from uuid import uuid4
 
 from reweave.models.conversation import NormalizedConversation
 from reweave.parsers.detector import detect_and_parse
+from reweave.source_filters import add_context_source_filter
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,7 @@ class ImportSummary:
     updated_messages: int = 0
     invalidated_embeddings: int = 0
     skipped_files: tuple[Path, ...] = ()
+    conversation_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -146,6 +150,7 @@ class ArchiveStore:
         updated_messages = 0
         invalidated_embeddings = 0
         skipped_files: list[Path] = []
+        conversation_ids: list[str] = []
 
         with self._connect() as conn:
             for file_path in sorted(input_dir.rglob("*.json")):
@@ -163,6 +168,7 @@ class ArchiveStore:
                     inserted_messages += result[2]
                     updated_messages += result[3]
                     invalidated_embeddings += result[4]
+                    conversation_ids.append(result[5])
 
         return ImportSummary(
             parsed_conversations=parsed,
@@ -172,6 +178,7 @@ class ArchiveStore:
             updated_messages=updated_messages,
             invalidated_embeddings=invalidated_embeddings,
             skipped_files=tuple(skipped_files),
+            conversation_ids=tuple(dict.fromkeys(conversation_ids)),
         )
 
     def import_path(
@@ -226,7 +233,7 @@ class ArchiveStore:
             if stored is None:  # pragma: no cover - guarded by the transaction above.
                 raise RuntimeError("Captured conversation could not be read after persistence.")
 
-        inserted_conversation, updated_conversation, inserted, updated, invalidated = result
+        inserted_conversation, updated_conversation, inserted, updated, invalidated, _ = result
         if inserted_conversation:
             outcome = "created"
         elif updated_conversation or inserted or updated:
@@ -249,6 +256,7 @@ class ArchiveStore:
         updated_messages = 0
         invalidated_embeddings = 0
         skipped_files: list[Path] = []
+        conversation_ids: list[str] = []
 
         with self._connect() as conn:
             try:
@@ -264,6 +272,7 @@ class ArchiveStore:
                     inserted_messages += result[2]
                     updated_messages += result[3]
                     invalidated_embeddings += result[4]
+                    conversation_ids.append(result[5])
 
         return ImportSummary(
             parsed_conversations=parsed,
@@ -273,6 +282,7 @@ class ArchiveStore:
             updated_messages=updated_messages,
             invalidated_embeddings=invalidated_embeddings,
             skipped_files=tuple(skipped_files),
+            conversation_ids=tuple(dict.fromkeys(conversation_ids)),
         )
 
     def search(
@@ -283,6 +293,8 @@ class ArchiveStore:
         date_from: str | None = None,
         date_to: str | None = None,
         title: str | None = None,
+        space_id: str | None = None,
+        item_type: str | None = None,
         limit: int = 20,
     ) -> list[SearchResult]:
         """Search exact, prefix, and substring candidates and fuse their ranks."""
@@ -316,6 +328,8 @@ class ArchiveStore:
                     date_from=date_from,
                     date_to=date_to,
                     title=title,
+                    space_id=space_id,
+                    item_type=item_type,
                     limit=candidate_limit,
                 )
                 for rank, row in enumerate(rows, start=1):
@@ -367,6 +381,8 @@ class ArchiveStore:
         date_from: str | None,
         date_to: str | None,
         title: str | None,
+        space_id: str | None,
+        item_type: str | None,
         limit: int,
     ) -> list[sqlite3.Row]:
         clauses = [f"{table} MATCH ?"]
@@ -383,6 +399,7 @@ class ArchiveStore:
         if title:
             clauses.append("c.title LIKE ?")
             params.append(f"%{title}%")
+        add_context_source_filter(clauses, params, space_id=space_id, item_type=item_type)
         params.append(max(1, limit))
         return conn.execute(
             f"""
@@ -412,6 +429,8 @@ class ArchiveStore:
         date_from: str | None = None,
         date_to: str | None = None,
         title: str | None = None,
+        space_id: str | None = None,
+        item_type: str | None = None,
         limit: int = 20,
         excerpts_per_conversation: int = 3,
     ) -> list[ConversationSearchResult]:
@@ -422,6 +441,8 @@ class ArchiveStore:
             date_from=date_from,
             date_to=date_to,
             title=title,
+            space_id=space_id,
+            item_type=item_type,
             limit=max(limit * excerpts_per_conversation * 2, limit),
         )
         grouped: dict[str, list[SearchResult]] = {}
@@ -627,34 +648,54 @@ class ArchiveStore:
         source_path: Path | str,
         *,
         allow_timestamp_fallback: bool = True,
-    ) -> tuple[bool, bool, int, int, int]:
+    ) -> tuple[bool, bool, int, int, int, str]:
         existing = None
+        id_match = None
         if conversation.source_id:
             existing = conn.execute(
                 "SELECT * FROM conversations WHERE source = ? AND source_id = ?",
                 (conversation.source, conversation.source_id),
             ).fetchone()
         if existing is None:
-            existing = conn.execute(
+            id_match = conn.execute(
                 "SELECT * FROM conversations WHERE id = ?",
                 (conversation.id,),
             ).fetchone()
+            if (
+                id_match is not None
+                and id_match["source"] == conversation.source
+                and not (
+                    conversation.source_id
+                    and id_match["source_id"]
+                    and conversation.source_id != id_match["source_id"]
+                )
+            ):
+                existing = id_match
         if existing is None and allow_timestamp_fallback:
-            existing = conn.execute(
+            candidates = conn.execute(
                 """
                 SELECT * FROM conversations
                 WHERE source = ? AND created_at = ?
+                    AND (? IS NULL OR source_id IS NULL OR source_id = '')
                 ORDER BY rowid
-                LIMIT 1
+                LIMIT 2
                 """,
-                (conversation.source, conversation.created_at),
-            ).fetchone()
+                (conversation.source, conversation.created_at, conversation.source_id or None),
+            ).fetchall()
+            # A missing identity can upgrade a unique legacy match, not an arbitrary source.
+            existing = candidates[0] if len(candidates) == 1 else None
 
         inserted_conversation = existing is None
         updated_conversation = False
         archive_id = conversation.id if existing is None else existing["id"]
+        if existing is None and id_match is not None:
+            # Legacy timestamp-derived IDs can collide after gaining an external identity.
+            archive_id = uuid4().hex
+        source_id = conversation.source_id or (
+            existing["source_id"] if existing is not None else None
+        )
         values = (
-            conversation.source_id,
+            source_id,
             conversation.source,
             conversation.title,
             conversation.created_at,
@@ -815,6 +856,7 @@ class ArchiveStore:
             inserted_messages,
             updated_messages,
             invalidated_embeddings,
+            archive_id,
         )
 
     @staticmethod
@@ -1005,10 +1047,15 @@ class ArchiveStore:
         if column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
 
 def export_conversation_markdown(

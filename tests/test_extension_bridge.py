@@ -193,8 +193,7 @@ def test_native_host_reports_actionable_unavailable_and_incompatible_states(tmp_
         == "unsupported_message"
     )
     assert (
-        handle_native_message({"type": "ping", "protocol_version": 99})["status"]
-        == "incompatible"
+        handle_native_message({"type": "ping", "protocol_version": 99})["status"] == "incompatible"
     )
 
 
@@ -314,9 +313,7 @@ def test_native_host_forwards_context_with_token_and_returns_only_insertion(tmp_
     token = "private-runtime-token-with-enough-entropy"
     write_runtime_descriptor(runtime_path, port=45678, token=token, pid=991)
     insertion_text = (
-        "<reweave_context>\n"
-        "[Reweave:project-high] Keep source provenance.\n"
-        "</reweave_context>"
+        "<reweave_context>\n[Reweave:project-high] Keep source provenance.\n</reweave_context>"
     )
 
     def fake_urlopen(request, timeout):
@@ -361,7 +358,7 @@ def test_native_host_forwards_context_with_token_and_returns_only_insertion(tmp_
 
 @pytest.mark.parametrize(
     ("status_code", "reason"),
-    [(409, "context_unavailable"), (422, "invalid_context"), (503, "connection_rejected")],
+    [(409, "destination_changed"), (422, "invalid_context"), (503, "connection_rejected")],
 )
 def test_native_host_maps_context_failure_states(tmp_path, status_code, reason):
     runtime_path = tmp_path / "extension-bridge.json"
@@ -390,3 +387,63 @@ def test_unavailable_native_host_probe_does_not_create_app_directories(tmp_path,
 
     assert check_app_availability()["reason"] == "app_not_running"
     assert not missing_data_dir.exists()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "status": "destination_confirmation_required",
+            "destination": "unknown",
+            "destination_revision": 0,
+            "spaces": [],
+        },
+        {"status": "destination_saved", "destination": "shared", "destination_revision": 2},
+        {
+            "status": "sensitive_preview",
+            "preview_token": "preview",
+            "destination": "private",
+            "items": [
+                {
+                    "item_id": "sensitive",
+                    "version": 1,
+                    "text": "Synthetic sensitive claim.",
+                    "sources": [],
+                }
+            ],
+        },
+        {"status": "sensitive_confirmed", "confirmation_token": "grant"},
+        {"status": "error", "reason": "confirmation_expired"},
+    ],
+)
+def test_native_host_forwards_bounded_trust_states_without_other_payload_data(tmp_path, payload):
+    runtime_path = tmp_path / "extension-bridge.json"
+    write_runtime_descriptor(runtime_path, port=45678, token="a" * 43, pid=991)
+    result = forward_context_assembly(
+        {**_context_request_payload(), "action": "preview_sensitive"},
+        runtime_path=runtime_path,
+        urlopen=lambda request, timeout: _FakeResponse({**payload, "raw_draft": "Never forward"}),
+    )
+    assert result["type"] == "context_result"
+    assert result["status"] == payload["status"]
+    assert "raw_draft" not in result
+    assert "insertion_text" not in result
+
+
+def test_native_host_rejects_malformed_sensitive_preview(tmp_path):
+    runtime_path = tmp_path / "extension-bridge.json"
+    write_runtime_descriptor(runtime_path, port=45678, token="a" * 43, pid=991)
+    result = forward_context_assembly(
+        _context_request_payload(),
+        runtime_path=runtime_path,
+        urlopen=lambda request, timeout: _FakeResponse(
+            {
+                "status": "sensitive_preview",
+                "preview_token": "preview",
+                "items": [
+                    {"item_id": "sensitive", "version": "old", "text": "claim", "sources": []}
+                ],
+            }
+        ),
+    )
+    assert result["reason"] == "malformed_response"

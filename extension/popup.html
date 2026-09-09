@@ -22,11 +22,38 @@
         </div>
       </section>
 
+      <section id="destination-panel" class="review-panel" hidden aria-labelledby="destination-title">
+        <h2 id="destination-title">Where will this context go?</h2>
+        <p id="destination-hint" class="detail"></p>
+        <label for="destination-choice">Conversation destination</label>
+        <select id="destination-choice">
+          <option value="">Choose a destination</option>
+          <option value="private">Private — my personal conversation</option>
+          <option value="work">Work</option>
+          <option value="client">Client</option>
+          <option value="shared">Shared</option>
+        </select>
+        <p class="privacy-note">Choose allowed spaces below. Private with no selected spaces allows relevant non-sensitive context across your library. Other destinations require selected spaces.</p>
+        <fieldset id="scope-choices"><legend>Allowed spaces</legend></fieldset>
+        <button id="remember-destination" type="button">Remember for this conversation</button>
+      </section>
+
+      <section id="sensitive-panel" class="review-panel" hidden aria-labelledby="sensitive-title">
+        <h2 id="sensitive-title">Review sensitive context</h2>
+        <p id="sensitive-hint" class="detail"></p>
+        <div id="sensitive-items"></div>
+        <button id="confirm-sensitive" type="button" disabled>Use selected items once</button>
+        <p class="privacy-note">This approval expires in two minutes. Changes to the draft, destination, item, or source require another preview.</p>
+      </section>
+
       <div class="actions">
         <button id="use" type="button" hidden>Use Reweave context</button>
         <button id="save" type="button" hidden>Save current conversation</button>
         <button id="retry" class="secondary" type="button" hidden>Retry connection</button>
+        <button id="review-sensitive" class="secondary" type="button" hidden>Review sensitive context</button>
+        <button id="change-destination" class="secondary" type="button" hidden>Change destination</button>
       </div>
+      <details id="use-explanation" hidden><summary>Why context was used or excluded</summary><ul id="use-reasons"></ul></details>
       <p class="privacy-note">No conversation is read until you choose an explicit action.</p>
     </main>
     <script src="popup.js"></script>

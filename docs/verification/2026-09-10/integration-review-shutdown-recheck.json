@@ -1,0 +1,7 @@
+{
+  "launcher": "desktop.running_app (headless server; no native window)",
+  "shutdown_seconds": 3.012,
+  "worker_running_after_launcher_exit": false,
+  "second_owner_acquired_after_exit": true,
+  "worker_can_finish_write": true
+}

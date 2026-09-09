@@ -3,10 +3,34 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 import httpx
+
+_provider_attempt_recorder: ContextVar[Callable[[], None] | None] = ContextVar(
+    "provider_attempt_recorder", default=None
+)
+
+
+@contextmanager
+def provider_attempt_recording(record: Callable[[], None]):
+    """Reserve source allowance at each send boundary in this execution context."""
+    token = _provider_attempt_recorder.set(record)
+    try:
+        yield
+    finally:
+        _provider_attempt_recorder.reset(token)
+
+
+def record_provider_attempt() -> None:
+    """Called once immediately before a provider request, after pre-send guards."""
+    record = _provider_attempt_recorder.get()
+    if record is not None:
+        record()
 
 
 class LLMProvider(Protocol):
@@ -59,6 +83,10 @@ class ProviderRequestError(ValueError):
     """Raised when a provider request fails and should not be retried."""
 
 
+class ProviderConnectionChangedError(ProviderConfigurationError):
+    """An unsent request lost its saved-profile authorization."""
+
+
 class ProviderAuthenticationError(ProviderRequestError):
     """Raised when all enabled API keys are rejected by the provider."""
 
@@ -88,11 +116,14 @@ class ModelDiscoveryResult:
 class FailoverLLMProvider:
     """Try multiple API keys for the same provider in priority order."""
 
+    reports_provider_attempts = True
+
     def __init__(self, settings: LLMSettings, credentials: tuple[LLMCredential, ...]):
         if not credentials:
             raise ProviderConfigurationError("At least one enabled API key is required.")
         self.settings = settings
         self.credentials = credentials
+        self.before_attempt: Callable[[], None] | None = None
 
     def generate_text(
         self,
@@ -133,11 +164,14 @@ class FailoverLLMProvider:
     def _try_keys(self, method_name: str, **kwargs):
         failures: list[tuple[str, httpx.HTTPStatusError | httpx.RequestError]] = []
         for credential in self.credentials:
-            provider = create_provider(
-                replace(self.settings, api_key=credential.api_key)
-            )
+            if self.before_attempt is not None:
+                self.before_attempt()
+            provider = create_provider(replace(self.settings, api_key=credential.api_key))
             try:
                 method = getattr(provider, method_name)
+                if not getattr(provider, "reports_provider_attempts", False):
+                    # Third-party/test adapters have one send per generation method.
+                    record_provider_attempt()
                 return method(**kwargs)
             except (httpx.HTTPStatusError, httpx.RequestError) as exc:
                 if not _is_retryable_provider_error(exc):
@@ -148,6 +182,8 @@ class FailoverLLMProvider:
 
 class OpenAICompatibleProvider:
     """OpenAI chat-completions compatible provider."""
+
+    reports_provider_attempts = True
 
     def __init__(self, api_key: str, base_url: str = "https://api.openai.com/v1"):
         if not api_key:
@@ -164,6 +200,7 @@ class OpenAICompatibleProvider:
         temperature: float = 0.2,
         max_tokens: int = 4096,
     ) -> str:
+        record_provider_attempt()
         response = httpx.post(
             f"{self.base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -204,6 +241,8 @@ class OpenAICompatibleProvider:
 class AnthropicProvider:
     """Anthropic Messages API provider."""
 
+    reports_provider_attempts = True
+
     def __init__(self, api_key: str, base_url: str = "https://api.anthropic.com/v1"):
         if not api_key:
             raise ProviderConfigurationError("API key is required.")
@@ -219,6 +258,7 @@ class AnthropicProvider:
         temperature: float = 0.2,
         max_tokens: int = 4096,
     ) -> str:
+        record_provider_attempt()
         response = httpx.post(
             f"{self.base_url}/messages",
             headers={
@@ -261,6 +301,8 @@ class AnthropicProvider:
 class GeminiProvider:
     """Google Gemini generateContent provider."""
 
+    reports_provider_attempts = True
+
     def __init__(
         self,
         api_key: str,
@@ -280,6 +322,7 @@ class GeminiProvider:
         temperature: float = 0.2,
         max_tokens: int = 4096,
     ) -> str:
+        record_provider_attempt()
         response = httpx.post(
             f"{self.base_url}/models/{model}:generateContent",
             params={"key": self.api_key},
@@ -367,9 +410,7 @@ def discover_available_models(
 ) -> ModelDiscoveryResult:
     """Fetch models available to the first enabled credential accepted by the provider."""
     if not credentials:
-        raise ProviderConfigurationError(
-            "Add and enable an API key before loading models."
-        )
+        raise ProviderConfigurationError("Add and enable an API key before loading models.")
 
     authentication_failures = 0
     permission_failures = 0
@@ -397,9 +438,7 @@ def discover_available_models(
                 "Could not reach the provider. Check your connection and try again."
             ) from exc
         except (KeyError, TypeError, ValueError) as exc:
-            raise ProviderRequestError(
-                "The provider returned an invalid model list."
-            ) from exc
+            raise ProviderRequestError("The provider returned an invalid model list.") from exc
 
         return ModelDiscoveryResult(
             models=tuple(sorted(set(models), key=str.casefold)),
@@ -407,9 +446,7 @@ def discover_available_models(
         )
 
     if authentication_failures:
-        raise ProviderAuthenticationError(
-            "That API key was not accepted. Check it and try again."
-        )
+        raise ProviderAuthenticationError("That API key was not accepted. Check it and try again.")
     if permission_failures:
         raise ProviderPermissionError(
             "The API key is valid, but it does not have permission to list models."
@@ -470,11 +507,7 @@ def _extract_model_ids(provider: str, data: dict[str, Any]) -> list[str]:
                 models.append(model_id)
         return models
 
-    return [
-        model_id
-        for item in data.get("data", [])
-        if (model_id := str(item["id"]).strip())
-    ]
+    return [model_id for item in data.get("data", []) if (model_id := str(item["id"]).strip())]
 
 
 def _is_retryable_provider_error(exc: httpx.HTTPStatusError | httpx.RequestError) -> bool:
@@ -493,9 +526,7 @@ def _provider_error_summary(exc: httpx.HTTPStatusError | httpx.RequestError) -> 
 def _raise_failover_error(
     failures: list[tuple[str, httpx.HTTPStatusError | httpx.RequestError]],
 ) -> None:
-    failure_text = "; ".join(
-        f"{label}: {_provider_error_summary(exc)}" for label, exc in failures
-    )
+    failure_text = "; ".join(f"{label}: {_provider_error_summary(exc)}" for label, exc in failures)
     if not failures:
         raise ProviderConfigurationError("No enabled API keys were attempted.")
     errors = [exc for _, exc in failures]

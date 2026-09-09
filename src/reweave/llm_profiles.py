@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from threading import Lock
 from uuid import uuid4
 
 import keyring
 
 SERVICE_NAME = "Reweave"
+_MEMORY_SECRETS: dict[tuple[str, str], str] = {}
+_MEMORY_SECRETS_LOCK = Lock()
 
 
 @dataclass(frozen=True)
@@ -67,6 +71,12 @@ class LLMProfileStore:
 
     def __init__(self, path: Path):
         self.path = path
+        self.credential_backend = os.getenv("REWEAVE_CREDENTIAL_BACKEND", "system")
+        if self.credential_backend not in {"system", "memory"}:
+            raise ValueError("REWEAVE_CREDENTIAL_BACKEND must be system or memory.")
+        # The volatile backend is explicit and scoped to this library, never a
+        # fallback from an unavailable OS store. No secret is written to disk.
+        self._credential_namespace = str(path.resolve())
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def list(self) -> StoredLLMProfiles:
@@ -282,12 +292,29 @@ class LLMProfileStore:
         )
 
     def _set_secret(self, profile_id: str, key_id: str, value: str) -> None:
+        if self.credential_backend == "memory":
+            with _MEMORY_SECRETS_LOCK:
+                _MEMORY_SECRETS[(self._credential_namespace, _secret_name(profile_id, key_id))] = (
+                    value
+                )
+            return
         keyring.set_password(SERVICE_NAME, _secret_name(profile_id, key_id), value)
 
     def _get_secret(self, profile_id: str, key_id: str) -> str | None:
+        if self.credential_backend == "memory":
+            with _MEMORY_SECRETS_LOCK:
+                return _MEMORY_SECRETS.get(
+                    (self._credential_namespace, _secret_name(profile_id, key_id))
+                )
         return keyring.get_password(SERVICE_NAME, _secret_name(profile_id, key_id))
 
     def _delete_secret(self, profile_id: str, key_id: str) -> None:
+        if self.credential_backend == "memory":
+            with _MEMORY_SECRETS_LOCK:
+                _MEMORY_SECRETS.pop(
+                    (self._credential_namespace, _secret_name(profile_id, key_id)), None
+                )
+            return
         try:
             keyring.delete_password(SERVICE_NAME, _secret_name(profile_id, key_id))
         except keyring.errors.PasswordDeleteError:

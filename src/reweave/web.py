@@ -7,54 +7,71 @@ import secrets
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock
 from typing import Any, Literal
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
+from reweave.analysis_policy import (
+    AnalysisLimitError,
+    AnalysisPolicy,
+    AnalysisPolicyStore,
+    BudgetedProvider,
+    InterruptibleProvider,
+)
 from reweave.archive import ArchiveStore, ImportSummary
 from reweave.archive_answers import answer_archive
 from reweave.archive_management import ArchiveManager
+from reweave.backup_api import backup_router, cleanup_backup_transfers
 from reweave.context_assembly import (
-    AllowedScope,
-    ContextAssemblyInput,
     ContextAssemblyResult,
-    ContextUnavailableError,
-    CurrentChatMessage,
-    assemble_context,
 )
+from reweave.context_chunking import ChunkStore, PartialAnalysisError
 from reweave.context_extraction import (
+    CONTEXT_EXTRACTION_PROMPT_VERSION,
     ContextExtractionResult,
+    context_extraction_system_prompt,
     conversation_source_fingerprint,
     estimate_context_input_usage,
     extract_context_from_conversation,
 )
+from reweave.context_graph import ContextGraphService, graph_router
 from reweave.context_library import (
     ContextAnalysisQueueJob,
     ContextItem,
     ContextLibraryStore,
+    ContextRevisionConflictError,
     ConversationBrief,
 )
+from reweave.context_management import management_router
+from reweave.context_retrieval import ContextRetriever
+from reweave.context_review import ContextReviewStore, effective_confidence, review_router
 from reweave.context_scheduler import ContextAnalysisScheduler, SchedulerRuntime
+from reweave.context_trust import ContextTrustService, ContextTrustStore
 from reweave.conversation_capture import ConversationCapture
+from reweave.diagnostics import diagnostics_router
+from reweave.encrypted_backup import EncryptedBackupService
 from reweave.insights import generate_insight_report
 from reweave.llm import (
     LLMSettings,
     ProviderAuthenticationError,
     ProviderConfigurationError,
+    ProviderConnectionChangedError,
     ProviderConnectionError,
     ProviderPermissionError,
     ProviderRateLimitError,
     ProviderRequestError,
     ProviderTransientError,
     create_failover_provider,
+    create_provider,
     discover_available_models,
 )
 from reweave.llm_profiles import (
@@ -66,6 +83,8 @@ from reweave.llm_profiles import (
     ProfileInput,
     ensure_default_profiles,
 )
+from reweave.local_origin import LocalOriginMiddleware
+from reweave.maintenance import MaintenanceGate, MaintenanceMiddleware
 from reweave.memory_audits import (
     AuditEvidence,
     AuditSession,
@@ -116,6 +135,23 @@ class ContextAnalysisRequest(BaseModel):
 
 class ContextAnalysisQueueRetryRequest(BaseModel):
     settings: LLMSettingsRequest = Field(default_factory=LLMSettingsRequest)
+
+
+class AnalysisPolicyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    daily_attempt_limit: int = Field(default=10, ge=1, le=1000)
+    daily_token_limit: int = Field(default=200_000, ge=1000, le=10_000_000)
+    analysis_mode: Literal["auto", "project", "learning", "research_writing", "context_handoff"] = (
+        "auto"
+    )
+    personal_instructions: str = Field(default="", max_length=4000)
+
+
+class ContextEnqueueRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    conversation_ids: list[str] = Field(min_length=1, max_length=1000)
+    reanalyze: bool = False
 
 
 class CurrentChatMessageRequest(BaseModel):
@@ -270,9 +306,7 @@ class MemoryAuditEvidenceInput(BaseModel):
 
 class MemoryAuditItemUpdateRequest(BaseModel):
     statement_kind: Literal["direct_statement", "model_inference", "unclear"]
-    evidence_verdict: Literal[
-        "supported", "contradicted", "mixed", "not_found", "unclear"
-    ]
+    evidence_verdict: Literal["supported", "contradicted", "mixed", "not_found", "unclear"]
     issue_tags: list[str] = Field(default_factory=list)
     severity: Literal["low", "medium", "high", "unclear"]
     redacted_example: str = Field(default="", max_length=2_000)
@@ -298,6 +332,13 @@ def create_app(
 ) -> FastAPI:
     """Create the FastAPI app."""
     scheduler_holder: dict[str, ContextAnalysisScheduler] = {}
+    stopping = Event()
+
+    def resolve_runtime_settings(request, profiles):
+        settings, provider = _resolve_llm_settings(request, profiles)
+        return settings, InterruptibleProvider(
+            provider or create_provider(settings), stopping.is_set
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -307,19 +348,59 @@ def create_app(
         try:
             yield
         finally:
+            stopping.set()
             if scheduler is not None:
                 scheduler.stop()
+            for executor in (
+                insight_executor,
+                semantic_executor,
+                answer_executor,
+                context_executor,
+            ):
+                executor.shutdown(wait=True, cancel_futures=True)
+            if scheduler is not None:
+                scheduler.join()
 
     app = FastAPI(title="Reweave", lifespan=lifespan)
+    app_paths = get_app_paths(data_dir)
+    backup_service = EncryptedBackupService(db_path, app_paths.llm_profiles_path)
+    backup_service.recover_interrupted_restore()
+    backup_service.cleanup_interrupted_workspaces()
+    app.state.remaining_backup_transfers = cleanup_backup_transfers(db_path)
+    maintenance_gate = MaintenanceGate()
+    app.state.maintenance_gate = maintenance_gate
+    app.state.backup_service = backup_service
+    app.add_middleware(
+        MaintenanceMiddleware,
+        gate=maintenance_gate,
+        exclusive_paths={
+            "/api/archive/encrypted-backup",
+            "/api/archive/encrypted-restore",
+            "/api/archive/encrypted-restore/preview",
+            "/api/archive/restore",
+            "/api/context/library",
+        },
+        upload_limit=backup_service.limits.max_artifact_bytes + 1024 * 1024,
+    )
+    app.add_middleware(LocalOriginMiddleware)
     store = ArchiveStore(db_path)
     context_library = ContextLibraryStore(db_path)
+    chunk_store = ChunkStore(db_path)
+    analysis_policy_store = AnalysisPolicyStore(db_path)
     context_library.recover_interrupted_analysis_jobs()
     app.state.context_library = context_library
+    app.include_router(management_router(context_library, _context_item_to_dict))
     archive_manager = ArchiveManager(db_path)
-    app_paths = get_app_paths(data_dir)
     profile_store = LLMProfileStore(app_paths.llm_profiles_path)
     ensure_default_profiles(profile_store)
+    app.include_router(diagnostics_router(context_library, analysis_policy_store, profile_store))
     semantic_index = SemanticIndex(db_path, app_paths.models_dir)
+    context_retriever = ContextRetriever(context_library, models_dir=app_paths.models_dir)
+    app.state.context_retriever = context_retriever
+    context_trust = ContextTrustService(context_library, retriever=context_retriever)
+    context_review = ContextReviewStore(context_library)
+    context_graph = ContextGraphService(context_library)
+    app.include_router(graph_router(context_graph))
     search_engine = SearchEngine(store, semantic_index)
     memory_audit_store = MemoryAuditStore(app_paths.memory_audit_db_path)
     insight_jobs: dict[str, dict[str, Any]] = {}
@@ -334,6 +415,35 @@ def create_app(
     context_jobs: dict[str, dict[str, Any]] = {}
     context_jobs_lock = Lock()
     context_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="reweave-context")
+    app.state.context_executor = context_executor
+    app.state.stopping = stopping
+
+    def after_restore() -> None:
+        context_retriever.clear_cache()
+        context_graph.clear_previews()
+        ContextTrustStore(db_path)
+        ContextReviewStore(context_library)
+        ChunkStore(db_path)
+        context_trust.clear_ephemeral()
+        context_library.recover_interrupted_analysis_jobs()
+        for jobs, lock in (
+            (insight_jobs, insight_jobs_lock),
+            (semantic_jobs, semantic_jobs_lock),
+            (answer_jobs, answer_jobs_lock),
+            (context_jobs, context_jobs_lock),
+        ):
+            with lock:
+                jobs.clear()
+
+    app.include_router(backup_router(backup_service, maintenance_gate, on_restored=after_restore))
+    app.include_router(
+        review_router(
+            context_review,
+            gate=maintenance_gate,
+            serialize_item=_context_item_to_dict,
+            on_library_deleted=after_restore,
+        )
+    )
 
     def update_insight_job(job_id: str, **changes: Any) -> None:
         with insight_jobs_lock:
@@ -535,7 +645,10 @@ def create_app(
                 conversation_id=request.conversation_id,
                 settings=settings,
                 analysis_mode=request.analysis_mode,
-                provider=provider,
+                provider=BudgetedProvider(
+                    provider or create_provider(settings), analysis_policy_store
+                ),
+                personal_instructions=analysis_policy_store.get().personal_instructions,
             )
         except Exception as exc:  # Background failures must always reach a terminal state.
             error = _context_job_error(exc)
@@ -572,6 +685,7 @@ def create_app(
                 job.source_record_id,
                 analysis_mode=job.analysis_mode,
                 max_context_chars=settings.max_context_chars,
+                personal_instructions=analysis_policy_store.get().personal_instructions,
             )
             context_library.record_analysis_queue_input_estimate(
                 job_id,
@@ -588,7 +702,11 @@ def create_app(
                 conversation_id=job.source_record_id,
                 settings=settings,
                 analysis_mode=job.analysis_mode,
-                provider=provider,
+                analysis_generation=job.analysis_generation,
+                provider=BudgetedProvider(
+                    provider or create_provider(settings), analysis_policy_store
+                ),
+                personal_instructions=analysis_policy_store.get().personal_instructions,
             )
             current_job = context_library.get_analysis_queue_job(job_id)
             if current_job is not None and current_job.status == "running":
@@ -600,7 +718,35 @@ def create_app(
             current_job = context_library.get_analysis_queue_job(job_id)
             if current_job is not None and current_job.status == "running":
                 error_code, error_summary = _context_queue_error(exc)
-                if automatic and _is_offline_context_error(exc):
+                if isinstance(exc, ProviderConnectionChangedError) or (
+                    isinstance(exc, PartialAnalysisError) and exc.reason == "connection_changed"
+                ):
+                    context_library.defer_analysis_queue_job(
+                        job_id,
+                        error_code="connection_changed",
+                        error_summary="The AI connection changed. Unsent analysis remains queued.",
+                        next_retry_at=(datetime.now(UTC) + timedelta(seconds=60)).isoformat(),
+                    )
+                elif isinstance(exc, PartialAnalysisError) and exc.reason == "invocation_limit":
+                    context_library.defer_analysis_queue_job(
+                        job_id,
+                        error_code="analysis_partial",
+                        error_summary=str(exc),
+                        next_retry_at=(datetime.now(UTC) + timedelta(seconds=60)).isoformat(),
+                    )
+                elif isinstance(exc, AnalysisLimitError) or (
+                    isinstance(exc, PartialAnalysisError) and exc.reason == "allowance"
+                ):
+                    tomorrow = datetime.now(UTC).date() + timedelta(days=1)
+                    context_library.defer_analysis_queue_job(
+                        job_id,
+                        error_code="analysis_limit",
+                        error_summary=str(exc),
+                        next_retry_at=datetime.combine(
+                            tomorrow, datetime.min.time(), tzinfo=UTC
+                        ).isoformat(),
+                    )
+                elif automatic and _is_offline_context_error(exc):
                     context_library.defer_analysis_queue_job(
                         job_id,
                         error_code=error_code,
@@ -621,6 +767,15 @@ def create_app(
                     )
 
     def resolve_scheduler_runtime() -> SchedulerRuntime | None:
+        policy = analysis_policy_store.get()
+        usage = analysis_policy_store.usage()
+        if (
+            stopping.is_set()
+            or not policy.enabled
+            or usage["remaining_attempts"] == 0
+            or usage["remaining_tokens"] == 0
+        ):
+            return None
         stored_profiles = profile_store.list()
         if not stored_profiles.active_profile_id:
             return None
@@ -638,22 +793,46 @@ def create_app(
         )
         return SchedulerRuntime(
             settings=settings,
-            provider=create_failover_provider(settings, credentials),
+            provider=InterruptibleProvider(
+                _guarded_saved_provider(
+                    profile_store, profile, settings, credentials, require_active=True
+                ),
+                stopping.is_set,
+            ),
         )
 
     context_scheduler = ContextAnalysisScheduler(
         context_library,
         resolve_runtime=resolve_scheduler_runtime,
-        submit_job=lambda job_id, settings, provider: context_executor.submit(
+        submit_job=lambda job_id, settings, provider: maintenance_gate.submit(
+            context_executor,
             run_queued_context_analysis,
             job_id,
             settings,
             provider,
             automatic=True,
         ),
+        operation_guard=maintenance_gate.operation,
     )
     scheduler_holder["scheduler"] = context_scheduler
     app.state.context_analysis_scheduler = context_scheduler
+
+    def enqueue_sources(
+        conversation_ids: tuple[str, ...] | list[str], *, reanalyze: bool = False
+    ) -> list[dict[str, Any]]:
+        jobs = []
+        mode = analysis_policy_store.get().analysis_mode
+        for conversation_id in dict.fromkeys(conversation_ids):
+            job, _ = context_library.enqueue_analysis(
+                conversation_id=conversation_id,
+                source_fingerprint=conversation_source_fingerprint(store, conversation_id),
+                analysis_mode=mode,
+            )
+            if reanalyze and job.status in {"complete", "failed", "pending"}:
+                job = context_library.requeue_analysis(job.id, analysis_mode=mode)
+            jobs.append(_context_analysis_queue_job_to_dict(job))
+        context_scheduler.wake()
+        return jobs
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -721,6 +900,8 @@ def create_app(
         date_from: str | None = None,
         date_to: str | None = None,
         title: str | None = None,
+        space_id: str | None = None,
+        item_type: str | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
         try:
@@ -731,6 +912,8 @@ def create_app(
                 date_from=date_from,
                 date_to=date_to,
                 title=title,
+                space_id=space_id,
+                item_type=item_type,
                 limit=limit,
             )
         except SemanticUnavailableError as exc:
@@ -747,7 +930,7 @@ def create_app(
     @app.post("/api/memory-audits/extract")
     def extract_memory_audit_items(request: MemoryAuditExtractRequest) -> dict[str, Any]:
         try:
-            settings, llm_provider = _resolve_llm_settings(request.settings, profile_store)
+            settings, llm_provider = resolve_runtime_settings(request.settings, profile_store)
             claims = extract_memory_claims(
                 request.raw_text,
                 assistant_source=request.assistant_source,
@@ -849,7 +1032,7 @@ def create_app(
         suggestion_error = None
         if request.settings is not None:
             try:
-                settings, llm_provider = _resolve_llm_settings(request.settings, profile_store)
+                settings, llm_provider = resolve_runtime_settings(request.settings, profile_store)
                 suggestion = classify_memory_claim(
                     item,
                     candidates,
@@ -928,7 +1111,7 @@ def create_app(
                 "error": None,
             }
             semantic_jobs[job_id] = job
-        semantic_executor.submit(run_semantic_job, job_id, request.rebuild)
+        maintenance_gate.submit(semantic_executor, run_semantic_job, job_id, request.rebuild)
         return dict(job)
 
     @app.get("/api/semantic/index/jobs/{job_id}")
@@ -952,7 +1135,7 @@ def create_app(
     @app.post("/api/archive-answers/jobs", status_code=202)
     def create_archive_answer_job(request: ArchiveAnswerRequest) -> dict[str, Any]:
         try:
-            settings, llm_provider = _resolve_llm_settings(request.settings, profile_store)
+            settings, llm_provider = resolve_runtime_settings(request.settings, profile_store)
         except ProviderConfigurationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         job_id = uuid4().hex
@@ -968,7 +1151,9 @@ def create_app(
         }
         with answer_jobs_lock:
             answer_jobs[job_id] = job
-        answer_executor.submit(run_answer_job, job_id, request, settings, llm_provider)
+        maintenance_gate.submit(
+            answer_executor, run_answer_job, job_id, request, settings, llm_provider
+        )
         return dict(job)
 
     @app.get("/api/archive-answers/jobs/{job_id}")
@@ -1007,35 +1192,19 @@ def create_app(
         return summary.__dict__
 
     @app.get("/api/archive/backup")
-    def backup_archive() -> StreamingResponse:
-        stamp = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
-        filename = f"reweave-backup-{stamp}.sqlite3"
-        temporary_path = app_paths.data_dir / "backup-downloads" / f"{uuid4().hex}.sqlite3"
-        archive_manager.backup_to(temporary_path)
-        return StreamingResponse(
-            _stream_file_and_remove(temporary_path),
-            media_type="application/vnd.sqlite3",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    def backup_archive() -> None:
+        raise HTTPException(
+            status_code=410,
+            detail="Plaintext backup downloads are retired. Create an encrypted backup in Sources.",
         )
 
     @app.post("/api/archive/restore")
-    def restore_archive(file: UploadFile = UPLOAD_BACKUP) -> dict[str, Any]:
-        filename = _safe_upload_name(file.filename)
-        if Path(filename).suffix.lower() not in {".db", ".sqlite", ".sqlite3"}:
-            raise HTTPException(status_code=400, detail="Choose a Reweave SQLite backup file.")
-        temporary_path = app_paths.imports_dir / f"restore-{uuid4().hex}-{filename}"
-        with open(temporary_path, "wb") as destination:
-            shutil.copyfileobj(file.file, destination)
-        try:
-            summary = archive_manager.restore_from(
-                temporary_path,
-                safety_backup_dir=app_paths.data_dir / "backups",
-            )
-        except (OSError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        finally:
-            temporary_path.unlink(missing_ok=True)
-        return summary.__dict__
+    def restore_archive() -> None:
+        raise HTTPException(
+            status_code=410,
+            detail="Legacy plaintext restore is retired. "
+            "Use an encrypted .reweave backup in Sources.",
+        )
 
     @app.post("/api/import")
     def import_directory(request: ImportRequest) -> dict[str, Any]:
@@ -1043,7 +1212,8 @@ def create_app(
             summary = store.import_path(Path(request.input_dir))
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _import_summary_to_dict(summary)
+        jobs = enqueue_sources(summary.conversation_ids)
+        return {**_import_summary_to_dict(summary), "queued_conversations": len(jobs)}
 
     @app.post("/api/import/path")
     def import_path(request: ImportPathRequest) -> dict[str, Any]:
@@ -1051,7 +1221,8 @@ def create_app(
             summary = store.import_path(Path(request.path))
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _import_summary_to_dict(summary)
+        jobs = enqueue_sources(summary.conversation_ids)
+        return {**_import_summary_to_dict(summary), "queued_conversations": len(jobs)}
 
     @app.post("/api/import/upload")
     def import_upload(files: list[UploadFile] = UPLOAD_FILES) -> dict[str, Any]:
@@ -1065,13 +1236,19 @@ def create_app(
             with open(target_path, "wb") as destination:
                 shutil.copyfileobj(upload.file, destination)
             try:
-                summaries.append(store.import_path(target_path))
+                summary = store.import_path(target_path)
+                summaries.append(summary)
+                enqueue_sources(summary.conversation_ids)
             except (OSError, ValueError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             finally:
                 target_path.unlink(missing_ok=True)
 
-        return _import_summary_to_dict(_merge_import_summaries(summaries))
+        summary = _merge_import_summaries(summaries)
+        return {
+            **_import_summary_to_dict(summary),
+            "queued_conversations": len(summary.conversation_ids),
+        }
 
     @app.post("/api/capture/conversations")
     def capture_conversation(
@@ -1086,6 +1263,7 @@ def create_app(
             queue_job, _ = context_library.enqueue_analysis(
                 conversation_id=summary.conversation_id,
                 source_fingerprint=source_fingerprint,
+                analysis_mode=analysis_policy_store.get().analysis_mode,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1114,32 +1292,16 @@ def create_app(
 
     @app.post("/api/context/assembly")
     def create_context_assembly(
-        request: ContextAssemblyRequest,
+        request: dict[str, Any],
         x_reweave_bridge_token: str | None = BRIDGE_TOKEN_HEADER,
     ) -> dict[str, Any]:
         require_extension_bridge_token(x_reweave_bridge_token)
-        assembly_request = ContextAssemblyInput(
-            provider=request.provider,
-            external_id=request.external_id,
-            messages=tuple(
-                CurrentChatMessage(role=message.role, content=message.content)
-                for message in request.messages
-            ),
-            draft=request.draft,
-            destination=request.destination,
-            allowed_scopes=tuple(
-                AllowedScope(scope_type=scope.scope_type, scope_key=scope.scope_key)
-                for scope in request.allowed_scopes
-            ),
-            max_context_chars=request.max_context_chars,
-        )
         try:
-            result = assemble_context(context_library, assembly_request)
-        except ContextUnavailableError as exc:
+            return context_trust.handle(request)
+        except ContextRevisionConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return _context_assembly_result_to_dict(result)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/llm/profiles")
     def list_llm_profiles() -> dict[str, Any]:
@@ -1147,8 +1309,7 @@ def create_app(
         return {
             "active_profile_id": stored.active_profile_id,
             "profiles": [
-                _llm_profile_to_dict(profile, profile_store)
-                for profile in stored.profiles
+                _llm_profile_to_dict(profile, profile_store) for profile in stored.profiles
             ],
         }
 
@@ -1328,9 +1489,7 @@ def create_app(
                 KeyInput(
                     label=request.label,
                     api_key=(
-                        request.api_key.get_secret_value()
-                        if request.api_key is not None
-                        else None
+                        request.api_key.get_secret_value() if request.api_key is not None else None
                     ),
                     enabled=request.enabled,
                     priority=request.priority,
@@ -1353,9 +1512,7 @@ def create_app(
                 KeyInput(
                     label=request.label,
                     api_key=(
-                        request.api_key.get_secret_value()
-                        if request.api_key is not None
-                        else None
+                        request.api_key.get_secret_value() if request.api_key is not None else None
                     ),
                     enabled=request.enabled,
                     priority=request.priority,
@@ -1378,7 +1535,7 @@ def create_app(
         if store.get_conversation(request.conversation_id) is None:
             raise HTTPException(status_code=404, detail="Archived conversation not found.")
         try:
-            settings, provider = _resolve_llm_settings(request.settings, profile_store)
+            settings, provider = resolve_runtime_settings(request.settings, profile_store)
         except ProviderConfigurationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1398,7 +1555,9 @@ def create_app(
         with context_jobs_lock:
             context_jobs[job_id] = job
         response = dict(job)
-        context_executor.submit(run_context_job, job_id, request, settings, provider)
+        maintenance_gate.submit(
+            context_executor, run_context_job, job_id, request, settings, provider
+        )
         return response
 
     @app.get("/api/context/analysis/jobs/{job_id}")
@@ -1409,6 +1568,50 @@ def create_app(
                 raise HTTPException(status_code=404, detail="Context analysis job not found.")
             return dict(job)
 
+    @app.get("/api/context/analysis/prompt")
+    def get_analysis_prompt() -> dict[str, str]:
+        policy = analysis_policy_store.get()
+        return {
+            "version": CONTEXT_EXTRACTION_PROMPT_VERSION,
+            "analysis_mode": policy.analysis_mode,
+            "system_prompt": context_extraction_system_prompt(
+                policy.analysis_mode, personal_instructions=policy.personal_instructions
+            ),
+        }
+
+    @app.get("/api/context/analysis/policy")
+    def get_analysis_policy() -> dict[str, Any]:
+        profiles = profile_store.list()
+        active = (
+            profile_store.get(profiles.active_profile_id) if profiles.active_profile_id else None
+        )
+        connected = bool(active and profile_store.credentials_for(active.id))
+        return {
+            "policy": asdict(analysis_policy_store.get()),
+            "usage": analysis_policy_store.usage(),
+            "provider_connected": connected,
+            "model": active.default_model if active else None,
+        }
+
+    @app.put("/api/context/analysis/policy")
+    def update_analysis_policy(request: AnalysisPolicyRequest) -> dict[str, Any]:
+        analysis_policy_store.save(AnalysisPolicy(**request.model_dump()))
+        if request.enabled:
+            with context_library._connect() as conn:
+                conn.execute(
+                    "UPDATE context_analysis_queue SET next_retry_at = NULL, "
+                    "last_error_code = NULL, last_error_summary = NULL "
+                    "WHERE status = 'pending' AND last_error_code = 'analysis_limit'"
+                )
+        context_scheduler.wake()
+        return get_analysis_policy()
+
+    @app.post("/api/context/analysis/queue", status_code=202)
+    def enqueue_context_sources(request: ContextEnqueueRequest) -> dict[str, Any]:
+        if any(store.get_conversation(cid) is None for cid in request.conversation_ids):
+            raise HTTPException(status_code=404, detail="Archived conversation not found.")
+        return {"results": enqueue_sources(request.conversation_ids, reanalyze=request.reanalyze)}
+
     @app.get("/api/context/analysis/queue")
     def list_context_analysis_queue(
         status: str | None = None,
@@ -1418,14 +1621,32 @@ def create_app(
             jobs = context_library.list_analysis_queue_jobs(status=status, limit=limit)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"results": [_context_analysis_queue_job_to_dict(job) for job in jobs]}
+        return {
+            "results": [
+                {
+                    **_context_analysis_queue_job_to_dict(job),
+                    "coverage": chunk_store.progress_for_source(
+                        job.source_record_id, job.source_fingerprint, job.analysis_generation
+                    ),
+                    "source_title": conversation.title
+                    if (conversation := store.get_conversation(job.source_record_id))
+                    else "Removed source",
+                }
+                for job in jobs
+            ]
+        }
 
     @app.get("/api/context/analysis/queue/{job_id}")
     def get_context_analysis_queue_job(job_id: str) -> dict[str, Any]:
         job = context_library.get_analysis_queue_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Context analysis queue job not found.")
-        return _context_analysis_queue_job_to_dict(job)
+        return {
+            **_context_analysis_queue_job_to_dict(job),
+            "coverage": chunk_store.progress_for_source(
+                job.source_record_id, job.source_fingerprint, job.analysis_generation
+            ),
+        }
 
     @app.post("/api/context/analysis/queue/{job_id}/retry", status_code=202)
     def retry_context_analysis_queue_job(
@@ -1449,13 +1670,14 @@ def create_app(
             context_library.supersede_analysis_queue_job(running_job.id)
             raise HTTPException(status_code=409, detail="A newer source version is available.")
         try:
-            settings, provider = _resolve_llm_settings(request.settings, profile_store)
+            settings, provider = resolve_runtime_settings(request.settings, profile_store)
             running_job = context_library.start_analysis_queue_job(job_id)
         except ProviderConfigurationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        context_executor.submit(
+        maintenance_gate.submit(
+            context_executor,
             run_queued_context_analysis,
             running_job.id,
             settings,
@@ -1465,10 +1687,52 @@ def create_app(
         return _context_analysis_queue_job_to_dict(running_job)
 
     @app.get("/api/context/briefs")
-    def list_context_briefs(limit: int = 100) -> dict[str, Any]:
+    def list_context_briefs(
+        limit: int = Query(default=100, ge=1, le=200),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        results = context_library.list_briefs(limit=limit + 1, offset=offset)
+        return {
+            "results": [_context_brief_to_dict(brief) for brief in results[:limit]],
+            "offset": offset,
+            "has_more": len(results) > limit,
+        }
+
+    @app.get("/api/context/search")
+    def search_context(
+        q: str = Query(min_length=1, max_length=4000),
+        limit: int = Query(default=50, ge=1, le=200),
+        space_id: str | None = None,
+        item_type: str | None = None,
+    ) -> dict[str, Any]:
+        result = asdict(
+            context_retriever.search_library(q, limit=limit, space_id=space_id, item_type=item_type)
+        )
+        with context_library._connect() as conn:
+            for hit in result["hits"]:
+                row = conn.execute(
+                    "SELECT sensitivity, status FROM context_items WHERE id = ?",
+                    (hit["item_id"],),
+                ).fetchone()
+                if row:
+                    hit.update(dict(row))
+        return result
+
+    @app.get("/api/context/sources/{conversation_id}")
+    def source_context(conversation_id: str) -> dict[str, Any]:
+        with context_library._connect() as conn:
+            ids = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT DISTINCT item_id FROM context_evidence WHERE source_record_id = ?",
+                    (conversation_id,),
+                )
+            ]
         return {
             "results": [
-                _context_brief_to_dict(brief) for brief in context_library.list_briefs(limit=limit)
+                _context_item_to_dict(item)
+                for item_id in ids
+                if (item := context_library.get_item(item_id)) is not None
             ]
         }
 
@@ -1486,11 +1750,15 @@ def create_app(
         return result
 
     @app.get("/api/context/items")
-    def list_context_items(limit: int = 200) -> dict[str, Any]:
+    def list_context_items(
+        limit: int = Query(default=200, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        results = context_library.list_items(limit=limit + 1, offset=offset)
         return {
-            "results": [
-                _context_item_to_dict(item) for item in context_library.list_items(limit=limit)
-            ]
+            "results": [_context_item_to_dict(item) for item in results[:limit]],
+            "offset": offset,
+            "has_more": len(results) > limit,
         }
 
     @app.get("/api/context/items/{item_id}")
@@ -1498,12 +1766,21 @@ def create_app(
         item = context_library.get_item(item_id)
         if item is None:
             raise HTTPException(status_code=404, detail="Context Item not found.")
-        return _context_item_to_dict(item)
+        return {
+            **_context_item_to_dict(item),
+            "semantic_matches": context_library.list_semantic_matches(item.id),
+        }
+
+    @app.get("/api/context/items/{item_id}/matches")
+    def get_context_matches(item_id: str) -> dict[str, Any]:
+        if context_library.get_item(item_id) is None:
+            raise HTTPException(status_code=404, detail="Context Item not found.")
+        return {"results": context_library.list_semantic_matches(item_id)}
 
     @app.post("/api/insights")
     def create_insight(request: InsightRequest) -> dict[str, Any]:
         try:
-            settings, provider = _resolve_llm_settings(request.settings, profile_store)
+            settings, provider = resolve_runtime_settings(request.settings, profile_store)
             report = generate_insight_report(
                 store,
                 conversation_ids=request.conversation_ids,
@@ -1524,7 +1801,7 @@ def create_app(
     @app.post("/api/insights/jobs", status_code=202)
     def create_insight_job(request: InsightRequest) -> dict[str, Any]:
         try:
-            settings, provider = _resolve_llm_settings(request.settings, profile_store)
+            settings, provider = resolve_runtime_settings(request.settings, profile_store)
         except ProviderConfigurationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1541,7 +1818,9 @@ def create_app(
         }
         with insight_jobs_lock:
             insight_jobs[job_id] = job
-        insight_executor.submit(run_insight_job, job_id, request, settings, provider)
+        maintenance_gate.submit(
+            insight_executor, run_insight_job, job_id, request, settings, provider
+        )
         return dict(job)
 
     @app.get("/api/insights/jobs/{job_id}")
@@ -1620,11 +1899,7 @@ def _memory_audit_session_to_dict(
             }
         )
     reviewed_count = sum(
-        bool(
-            item.user_statement_kind
-            and item.user_evidence_verdict
-            and item.user_severity
-        )
+        bool(item.user_statement_kind and item.user_evidence_verdict and item.user_severity)
         for item in session.items
     )
     return {
@@ -1701,6 +1976,7 @@ def _context_assembly_result_to_dict(result: ContextAssemblyResult) -> dict[str,
         "context_chars": result.context_chars,
         "context_budget_chars": result.context_budget_chars,
         "truncated": result.truncated,
+        "diagnostics": asdict(result.diagnostics) if result.diagnostics else None,
         "items": [
             {
                 "item_id": item.item_id,
@@ -1710,6 +1986,9 @@ def _context_assembly_result_to_dict(result: ContextAssemblyResult) -> dict[str,
                 "confidence": item.confidence,
                 "scopes": list(item.scopes),
                 "score": item.score,
+                "reasons": list(item.reasons),
+                "matched_terms": list(item.matched_terms),
+                "source_changed": item.source_changed,
                 "provenance": {
                     "provider": item.source_provider,
                     "title": item.source_title,
@@ -1757,6 +2036,7 @@ def _context_analysis_queue_job_to_dict(job: ContextAnalysisQueueJob) -> dict[st
         "source_record_id": job.source_record_id,
         "source_fingerprint": job.source_fingerprint,
         "analysis_mode": job.analysis_mode,
+        "analysis_generation": job.analysis_generation,
         "status": job.status,
         "attempt_count": job.attempt_count,
         "last_error_code": job.last_error_code,
@@ -1776,9 +2056,12 @@ def _context_item_to_dict(item: ContextItem) -> dict[str, Any]:
     return {
         "id": item.id,
         "canonical_text": item.canonical_text,
+        "inference_rationale": item.inference_rationale,
+        "authority": item.authority,
         "item_type": item.item_type,
         "epistemic_kind": item.epistemic_kind,
         "confidence": item.confidence,
+        "effective_confidence": effective_confidence(item),
         "sensitivity": item.sensitivity,
         "status": item.status,
         "current_version": item.current_version,
@@ -1789,6 +2072,7 @@ def _context_item_to_dict(item: ContextItem) -> dict[str, Any]:
         "scopes": [
             {
                 "scope_type": scope.scope_type,
+                "space_id": scope.space_id,
                 "scope_key": scope.scope_key,
                 "confidence": scope.confidence,
                 "created_at": scope.created_at,
@@ -1813,6 +2097,7 @@ def _context_item_to_dict(item: ContextItem) -> dict[str, Any]:
                 "source_available": bool(
                     evidence.source_conversation_id and evidence.source_message_id
                 ),
+                "source_changed": evidence.source_changed,
                 "created_at": evidence.created_at,
             }
             for evidence in item.evidence
@@ -1820,6 +2105,10 @@ def _context_item_to_dict(item: ContextItem) -> dict[str, Any]:
         "versions": [
             {
                 "version": version.version,
+                "inference_rationale": version.inference_rationale,
+                "authority": version.authority,
+                "scopes": [asdict(scope) for scope in version.scopes],
+                "evidence_ids": list(version.evidence_ids),
                 "canonical_text": version.canonical_text,
                 "item_type": version.item_type,
                 "epistemic_kind": version.epistemic_kind,
@@ -1854,6 +2143,10 @@ def _context_extraction_result_to_dict(result: ContextExtractionResult) -> dict[
         "reused_existing": result.reused_existing,
         "dropped_items": result.dropped_items,
         "deduplicated_items": result.deduplicated_items,
+        "matching_input_characters": result.matching_input_characters,
+        "matching_input_tokens": result.matching_input_tokens,
+        "matching_candidate_pairs": result.matching_candidate_pairs,
+        "coverage": result.coverage,
     }
 
 
@@ -1877,8 +2170,9 @@ def _merge_import_summaries(summaries: list[ImportSummary]) -> ImportSummary:
         inserted_messages=sum(summary.inserted_messages for summary in summaries),
         updated_messages=sum(summary.updated_messages for summary in summaries),
         invalidated_embeddings=sum(summary.invalidated_embeddings for summary in summaries),
-        skipped_files=tuple(
-            path for summary in summaries for path in summary.skipped_files
+        skipped_files=tuple(path for summary in summaries for path in summary.skipped_files),
+        conversation_ids=tuple(
+            dict.fromkeys(cid for summary in summaries for cid in summary.conversation_ids)
         ),
     )
 
@@ -1931,7 +2225,25 @@ def _resolve_llm_settings(
         temperature=request.temperature,
     )
     credentials = profile_store.credentials_for(profile.id)
-    return settings, create_failover_provider(settings, credentials)
+    return settings, _guarded_saved_provider(profile_store, profile, settings, credentials)
+
+
+def _guarded_saved_provider(profile_store, profile, settings, credentials, *, require_active=False):
+    provider = create_failover_provider(settings, credentials)
+
+    def before_attempt():
+        current = profile_store.get(profile.id)
+        if (
+            current != profile
+            or profile_store.credentials_for(profile.id) != credentials
+            or (require_active and profile_store.list().active_profile_id != profile.id)
+        ):
+            raise ProviderConnectionChangedError(
+                "The saved AI connection changed before transmission. Analysis remains queued."
+            )
+
+    provider.before_attempt = before_attempt
+    return provider
 
 
 def _llm_profile_to_dict(profile: LLMProfile, store: LLMProfileStore) -> dict[str, Any]:

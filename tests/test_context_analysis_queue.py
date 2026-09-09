@@ -19,9 +19,7 @@ def _seed_queue(tmp_path, fixtures_dir):
     return db_path, context, conversation_id, fingerprint
 
 
-def test_queue_is_idempotent_per_source_version_and_supersedes_stale_work(
-    tmp_path, fixtures_dir
-):
+def test_queue_is_idempotent_per_source_version_and_supersedes_stale_work(tmp_path, fixtures_dir):
     _, context, conversation_id, fingerprint = _seed_queue(tmp_path, fixtures_dir)
 
     first, created = context.enqueue_analysis(
@@ -91,7 +89,7 @@ def test_running_queue_work_recovers_as_retryable_without_storing_credentials(
         schema_version = conn.execute(
             "SELECT value FROM schema_meta WHERE key = 'context_schema_version'"
         ).fetchone()[0]
-    assert schema_version == "5"
+    assert schema_version == "7"
     assert "api_key" not in columns
     assert "profile_id" not in columns
     assert {
@@ -108,8 +106,7 @@ def test_scheduler_claims_are_bounded_atomic_and_keep_offline_deferral_attempt_f
     archive = ArchiveStore(db_path)
     archive.import_directory(fixtures_dir)
     conversation_ids = [
-        archive.search(query, limit=1)[0].conversation_id
-        for query in ("Obsidian", "Zettelkasten")
+        archive.search(query, limit=1)[0].conversation_id for query in ("Obsidian", "Zettelkasten")
     ]
     context = ContextLibraryStore(db_path)
     queued = [
@@ -234,4 +231,4 @@ def test_schema_v4_queue_migrates_scheduler_metadata_without_losing_pending_work
         schema_version = conn.execute(
             "SELECT value FROM schema_meta WHERE key = 'context_schema_version'"
         ).fetchone()[0]
-    assert schema_version == "5"
+    assert schema_version == "7"

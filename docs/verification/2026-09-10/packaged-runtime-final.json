@@ -1,0 +1,24 @@
+{
+  "date": "2026-09-09T16:18:04.553881+00:00",
+  "synthetic_only": true,
+  "native_windows_opened": false,
+  "registered_native_hosts": false,
+  "executables": {
+    "Reweave.exe": "5d149f730b67ec00ec8af782d0da06de49a7fb40a432862b4bc86360d8392113",
+    "ReweaveNativeHost.exe": "ffb7f4d63813312465604f4d67edb51b1ed2c6a68d2e787d91226f2f0c4dfaf9"
+  },
+  "capture": true,
+  "queued_without_key": true,
+  "analyzed": true,
+  "exact_source_evidence": true,
+  "native_use": true,
+  "source_segments": 1,
+  "restart_persistence": true,
+  "repeat_save_idempotent": true,
+  "destination_persisted": true,
+  "transient_draft_not_stored": true,
+  "descriptor_cleanup": true,
+  "loopback_fake_provider_calls": 1,
+  "paid_provider_calls": 0,
+  "outcome": "passed"
+}

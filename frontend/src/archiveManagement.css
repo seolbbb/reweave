@@ -872,3 +872,6 @@
     min-height: 44px;
   }
 }
+.libraryPagination { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; padding:16px 0; }
+.libraryAnalyze { align-self:center; margin-inline:8px; }
+@media(max-width:600px) { .libraryConversation{flex-wrap:wrap;} .libraryConversationMain{flex-basis:100%;} }
