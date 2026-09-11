@@ -2,7 +2,7 @@
 
 ## Document control
 
-- Last reviewed: 2026-07-22
+- Last reviewed: 2026-09-11
 - Working language: English
 - Historical mapping: DEC-001 through DEC-010 preserve the former D-001 through D-010 records from PRODUCT_STRATEGY_AND_ROADMAP.md.
 
@@ -15,6 +15,32 @@
 ## Decisions
 
 The first ten entries preserve the historical D-001 through D-010 decisions.
+
+### DEC-031 — Provide equivalent English and Korean entry documentation
+
+- Status: accepted
+- Date: 2026-09-11
+- Initiated by: User
+- Context: The owner explicitly requested an up-to-date, welcoming README in both English
+  and Korean, informed by actual widely starred repositories. The existing README mixed
+  current Context Library onboarding with a lengthy legacy CLI/API reference.
+- User intent/value protected: Readers should understand the product and reach a first useful
+  Save/Import-to-Use flow in either language, with accurate installation and privacy guidance.
+- Intervention: This request overrides the English-only documentation rule only for the
+  Korean README and reciprocal language-navigation labels. The protected AGENTS.md section
+  is retained verbatim; other project communication remains English.
+- Options considered: Interleave both languages in one long README; keep English only; or
+  provide separate equivalent READMEs with prominent language links and shared screenshots.
+- Decision: Keep README.md as the English entrypoint, add README.ko.md, and move detailed
+  developer/CLI reference out of the first-use flow. Learn structural patterns from real
+  repositories without copying their wording or implying equivalent features or maturity.
+- Consequences: TASK-014 includes bilingual entry documentation. Preserve the English UI and
+  all release/real-owner acceptance gates; no public binary release is authorized. Each README
+  update must keep commands, supported capabilities, privacy boundaries, and limits aligned.
+- Reconsider when: The owner changes the supported reader languages or requests wider UI or
+  documentation localization. This exception does not silently expand to other artifacts.
+- Supersedes: None
+- Superseded by: None
 
 ### DEC-001 — Position Reweave as a human-facing AI Memory Control Plane
 

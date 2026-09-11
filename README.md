@@ -1,421 +1,289 @@
 # Reweave
 
-Reweave is a local Windows Context Library for ChatGPT and Claude conversations.
-Save a whole web chat or import an export, then return to its decisions, lessons,
-projects and source evidence in the Reading Room. Explicit **Use Reweave** brings
-relevant allowed context into a later chat draft without submitting it.
+**Bring the useful parts of your AI conversations into the next one.**
 
-The archive and Library stay on your device. A connected BYOK provider analyzes
-saved sources within a visible daily allowance; without a key, capture, browsing
-and keyword search still work. Optional multilingual semantic search runs locally
-and downloads its model only when you enable Smart search.
+**English** · [한국어](README.ko.md)
 
-## How it works
+[Quick start](#quick-start) · [How to use it](#your-first-save-and-use) · [Privacy](#privacy-and-your-data) · [Development](docs/DEVELOPMENT.md) · [Roadmap](docs/ROADMAP.md)
 
-1. Import a ChatGPT/Claude export, or use the extension's explicit Save action.
-2. Reweave stores the conversation before queued analysis begins.
-3. Analysis produces a Conversation Brief and supported Context Items with exact
-   evidence. Long sources use bounded resumable parts and show incomplete progress.
-4. Home highlights decisions and useful context. Explore follows linked spaces;
-   Search finds Context and original sources globally.
-5. Correct an item or its space when needed. Version history and undo preserve
-   your changes. Review is reserved for exceptions, ambiguity and conflicts.
-6. In a later supported web chat, write a request and choose Use. Confirm the
-   destination when needed; restricted scopes and sensitive material have separate
-   controls. Reweave adds a bounded context block before the unchanged draft.
+[![License: MIT](https://img.shields.io/badge/License-MIT-31584B)](LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows-31584B)](#quick-start)
+[![Status: In development](https://img.shields.io/badge/Status-In_development-8A6D3B)](#project-status)
 
-Repeated imports and Saves are idempotent. Explicit reanalysis can use a new
-model while preserving user corrections. Removing a source keeps derived evidence
-snapshots; removing the derived Library is a separate explicit action.
+Reweave is a local Windows app that turns the ChatGPT and Claude conversations you
+choose into a searchable, connected library. Find a decision you made last month,
+check the conversation behind it, and bring relevant context into a new chat
+without writing the same background again.
 
-## Features
+You keep using ChatGPT or Claude. Reweave keeps the context between conversations.
 
-- Shared Reading Room design across Home, Explore, Sources, Search, Import,
-  Settings, onboarding, correction, backup, Review and extension controls.
-- Source-grounded observed, inferred and suggested items, with linked projects,
-  topics, Core Self, Personal, Work and destination scopes.
-- Source and Context keyword/semantic search with space/type filters and
-  bidirectional navigation to the original message.
-- Versioned corrections, space rename/merge, relationship rationale, confidence
-  decay, exception Review and explicit undo.
-- Scope-aware Use with expiring sensitive consent, draft preservation, duplicate
-  block replacement and no automatic submission or conversation capture.
-- Local relationship Graph and explicitly previewed, redacted PNG sharing.
-- Encrypted complete Library backup/restore, disconnected restored credentials,
-  and redacted diagnostic export.
+![Reweave Context Home showing a conversation brief, decisions, open questions, and links to source evidence](docs/verification/2026-09-10/browser-qa-home-1280-after.png)
 
-The current completion evidence and remaining owner acceptance are recorded in
-[Project Status](docs/PROJECT_STATUS.md). Automated or synthetic verification does
-not establish personal usefulness. The [Product Spec](docs/PRODUCT_SPEC.md) and
-[Roadmap](docs/ROADMAP.md) define the full accepted scope.
+*The Reading Room interface, captured from the running app with synthetic example
+data. The application UI is currently in English.*
 
-## Windows package
+## Why Reweave?
 
-Build the desktop bundle with `packaging/Reweave.spec`, then run
-`scripts/build_windows_installer.py` to produce `dist/Reweave-Setup.exe`.
-The per-user installer includes both executables and the unpacked extension.
-It does not launch the app, enable automatic startup or register browser access.
-See [Windows installation](packaging/installer/README.md) for the separate
-Chrome/Edge registration step, safe update/removal and isolated verification.
+Useful work often gets buried in chat history: a tradeoff you settled, a lesson
+you learned, or the reasons behind a project plan. Reweave makes those pieces
+available for the next conversation.
 
-Windows Save File and real browser-account checks are separate from headless
-package tests. Current limits and final acceptance are in Project Status.
-The [beta preparation guide](docs/release/README.md) records installation, privacy,
-public support boundaries and the owner decisions required before publication.
+| When you want to… | Reweave helps you… |
+| --- | --- |
+| Pick up a project after a break | Revisit its decisions, open questions, and next actions. |
+| Move from one AI assistant to another | Add relevant context to your next ChatGPT or Claude draft. |
+| Understand where a claim came from | Open its supporting message, inspect the evidence, and correct it. |
+| Find an idea without remembering the exact chat | Search the library and follow connections between topics and projects. |
 
-## Development install
+## What you can do
 
-Reweave requires Python 3.11 or newer. The development workflow uses
-[`uv`](https://docs.astral.sh/uv/).
+- **Save the conversations you choose.** Import ChatGPT/Claude exports or save the
+  current conversation through the Chrome/Edge extension. Saving works without an API key.
+- **Read the useful context.** Analysis creates a **Conversation Brief** for the
+  whole chat and **Context Items** for supported decisions, lessons, preferences,
+  facts, questions, and actions. Items distinguish observations, inferences, and suggestions.
+- **Follow the evidence.** Browse Home, Explore, and Sources; follow linked spaces
+  and open the original messages behind an item.
+- **Search locally.** Keyword search works immediately. Optional Smart search
+  adds meaning-based retrieval using a model that runs on your device.
+- **Reuse context deliberately.** **Use Reweave context** adds relevant, allowed
+  context before your existing draft. You review it and decide when to send.
+- **Correct and maintain your library.** Edit context with version history and
+  undo, rename or merge spaces, and resolve exceptions in Review.
+- **Back up and explore connections.** Create password-encrypted backups, restore
+  a library, explore its graph, or preview a redacted graph image for export.
 
-```bash
-uv sync
-```
+<details>
+<summary>See the graph view</summary>
 
-For the browser UI, install and build the frontend assets:
+![Reweave Explore graph connecting a project with a decision, lesson, open question, and action](docs/verification/2026-09-10/browser-qa-graph-desktop.png)
 
-```bash
+The graph uses the same items and relationships as Home and Explore. Select a node
+to inspect its context and sources. This capture also uses synthetic example data.
+
+</details>
+
+## Quick start
+
+**Current availability:** Reweave is in development. As of September 11, 2026, this
+repository has no published GitHub release. Start from source below. Windows
+packaging is available for local builds; the installer is currently unsigned.
+
+### Run from source on Windows
+
+You need **Git**, **Python 3.11+**, [**uv**](https://docs.astral.sh/uv/getting-started/installation/),
+and **Node.js 22.12+ with npm**. The desktop window uses Microsoft Edge WebView2.
+
+Run these commands in PowerShell:
+
+```powershell
+git clone https://github.com/seolbbb/reweave.git
+cd reweave
+uv sync --locked
 cd frontend
-npm install
+npm ci
 npm run build
 cd ..
-```
-
-The Vite build writes static assets to `src/reweave/web/dist`, which is included
-in Python package builds.
-
-## Quick Start
-
-The CLI works without the frontend build. Use `uv run` during development:
-
-Import an export directory, JSON file, or zip archive:
-
-```bash
-uv run reweave import ./data --db ./reweave.db
-```
-
-Search the archive:
-
-```bash
-uv run reweave search "zettelkasten" --mode auto --db ./reweave.db
-```
-
-### Choosing a search mode
-
-Start with `auto`. It uses hybrid keyword and semantic ranking when Smart search
-is ready, and safely falls back to keyword search when the local model or index
-is not installed.
-
-| Mode | Use it when | Trade-off |
-| --- | --- | --- |
-| `auto` **(recommended)** | You are searching normally or asking a natural-language question. | Best measured recall; requires Smart search for hybrid ranking, otherwise behaves like `keyword`. |
-| `keyword` | You remember an exact phrase, error message, command, name, code symbol, or distinctive partial word. | Fastest and needs no model, but can miss conversations that express the same idea with different words. |
-| `semantic` | You want meaning-only retrieval, remember the idea but not its wording, or want to inspect what the semantic channel contributes. | Requires the downloaded model and a complete index; exact identifiers may rank less reliably without keyword signals. |
-
-Practical examples:
-
-- Use `keyword` for `"blue lantern deployment"`, `TypeError`, `current_node`,
-  or a remembered part of a Korean word.
-- Use `auto` for questions such as “How did I decide to organize my notes?”
-  or “What was my safe database migration approach?”
-- Use `semantic` mainly to isolate meaning-based results while evaluating or
-  debugging retrieval. For everyday use, `auto` is usually safer.
-
-On the historical 32-query Korean and English archive golden set, hybrid `auto` improved
-Recall@10 from `0.3438` to `0.9688` while preserving all exact-query hits. On a
-50,000-message archive, measured p95 latency was `162 ms` for keyword and
-`717 ms` for warm hybrid search. These are reference measurements from one
-Windows machine, not universal guarantees. See
-[Search Evaluation](docs/search-evaluation.md) for the dataset, methodology,
-commands, and reproducible benchmark scripts.
-
-Enable local semantic search. This lazily downloads the multilingual model and
-indexes only missing or changed chunks:
-
-```bash
-uv run reweave index --db ./reweave.db
-```
-
-Optional legacy CLI command for a source-grounded answer using the configured BYOK provider:
-
-```bash
-uv run reweave ask "How did I decide to structure my notes?" --mode auto --db ./reweave.db
-```
-
-Open a conversation:
-
-```bash
-uv run reweave show <conversation_id> --db ./reweave.db
-```
-
-Export Markdown:
-
-```bash
-uv run reweave export <conversation_id> -o ./exports --db ./reweave.db
-uv run reweave export --query "obsidian vault" -o ./exports --db ./reweave.db
-```
-
-View archive statistics:
-
-```bash
-uv run reweave stats --db ./reweave.db
-```
-
-## Web App
-
-Build the frontend first, then start the local app:
-
-```bash
-cd frontend
-npm run build
-cd ..
-uv run reweave app --db ./reweave.db
-```
-
-Open `http://127.0.0.1:8765`.
-
-The web app provides the same Reading Room and local Library flows as the desktop
-app. Context activity contains provider allowance, pause/retry controls and the
-active versioned prompt. Settings manages BYOK profiles and optional Smart search.
-Sources retains JSON/ZIP import, original conversations and explicit source removal.
-Graph and exception Review are auxiliary Explore views. Legacy Ask Archive and
-Memory Audit remain internal/CLI compatibility components, with no standalone
-primary UI destination.
-
-If the frontend build is missing, `reweave app` still starts the API and prints
-a warning.
-
-### Local API
-
-The browser UI is backed by a local FastAPI server. The API is not intended as a
-public hosted service, but it is useful for local automation and testing.
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/health` | Check server readiness. |
-| `GET` | `/api/search?mode=auto\|keyword\|semantic` | Search grouped conversation results. |
-| `GET` | `/api/semantic/status` | Read local model and index readiness. |
-| `POST` | `/api/semantic/index/jobs` | Download the model if needed and index changed chunks. |
-| `GET` | `/api/semantic/index/jobs/{job_id}` | Read semantic indexing progress. |
-| `DELETE` | `/api/semantic/index` | Remove local embeddings and chunks. |
-| `DELETE` | `/api/semantic/model` | Remove the local index and downloaded model. |
-| `POST` | `/api/archive-answers/jobs` | Retrieve evidence and start a cited archive answer. |
-| `GET` | `/api/archive-answers/jobs/{job_id}` | Read answer progress and the validated result. |
-| `GET` | `/api/conversations/{conversation_id}` | Load one conversation and its messages. |
-| `POST` | `/api/import` | Import from a directory path. |
-| `POST` | `/api/import/path` | Import from a directory, JSON file, or zip path. |
-| `POST` | `/api/import/upload` | Upload one or more `.json` or `.zip` files. |
-| `POST` | `/api/insights` | Generate and save an insight report. |
-| `POST` | `/api/insights/jobs` | Start an asynchronous insight report with immediate progress. |
-| `GET` | `/api/insights/jobs/{job_id}` | Read insight progress and the completed report. |
-| `GET` | `/api/insights` | List saved insight reports. |
-| `GET` | `/api/insights/{report_id}` | Load one saved insight report. |
-
-## Desktop App
-
-Run Reweave in a native desktop window:
-
-```bash
 uv run reweave desktop
 ```
 
-You can also use the installed script name:
+This opens the desktop app. Onboarding lets you import past conversations or skip
+straight to an empty library. **You can import, browse, and search before connecting
+an AI provider.**
 
-```bash
-uv run reweave-desktop
+To explore without personal data, import the included
+[`tests/fixtures/chatgpt_sample.json`](tests/fixtures/chatgpt_sample.json) through
+**Import conversations**. Its original messages are searchable immediately;
+generated Briefs and Context Items require analysis.
+
+Prefer the local browser interface? After building the frontend, run:
+
+```powershell
+uv run reweave app --db ./reweave.db
 ```
 
-By default, the desktop app stores its database and imported files in the
-platform-specific Reweave application data directory. Pass `--db` or set
-`REWEAVE_DB` to use a specific database.
+Open [http://127.0.0.1:8765](http://127.0.0.1:8765), and stop the server with `Ctrl+C`
+when finished. This command uses a database in the current folder; the desktop
+uses a different default location. The browser extension requires the desktop
+launcher. See [data locations](#where-is-my-library-stored) before switching launch modes.
 
-For packaged desktop builds, `packaging/reweave_desktop.py` is the PyInstaller
-entrypoint and delegates to `reweave.desktop:main`.
+### Build the Windows package
 
-## Supported Exports
+After the source setup and frontend build, run from the repository root:
 
-Reweave currently supports:
-
-- ChatGPT `conversations.json` exports.
-- Claude JSON conversation exports.
-- Zip archives that contain supported JSON export files.
-
-During zip import, Reweave extracts JSON files only and ignores non-JSON assets.
-Unsupported JSON files are skipped.
-
-Zip extraction is constrained to the configured extraction directory and rejects
-unsafe archive entries that would write outside that directory.
-
-## Archive Storage
-
-The SQLite archive stores:
-
-- `conversations`: normalized metadata, source provider, title, timestamps,
-  message count, and source path.
-- `messages`: message role, content, timestamp, and original message index.
-- `messages_fts`: SQLite FTS5 index over titles and message content.
-- `messages_fts_trigram`: local partial-word and substring index.
-- `search_chunks`: 1,500-character source chunks with 200-character overlap.
-- `chunk_embeddings`: local float32 vectors for the opt-in multilingual model.
-- `insight_reports`: generated Markdown reports and their selected source
-  conversation IDs.
-
-The default CLI database path is `./reweave.db`. The desktop app defaults to the
-platform-specific Reweave application data directory unless `--db` or
-`REWEAVE_DB` is provided.
-
-One app or CLI command owns a Library at a time. Close the desktop app before
-running a direct CLI command against the same database. Shutdown waits for active
-writers before another process may open or restore that Library.
-
-## Legacy CLI insight reports
-
-Historical reports and APIs remain available for compatibility. New desktop analysis uses Conversation Briefs and Context Items.
-
-Insight reports are generated from conversations you select. Reweave detects the
-dominant Korean or English source language, explicitly requires that language in
-the model prompt, and produces rendered Markdown with these sections:
-
-- `Overview`
-- `Key concepts`
-- `Connections between conversations`
-- `Agreements, contradictions, and patterns`
-- `New or surprising insights`
-- `Suggested follow-up questions`
-- `Source references`
-
-Important claims should include source references such as
-`[conversation_id#mIndex]`. These references identify supporting messages. The legacy report generator uses
-concurrent chunk analysis; the current Context pipeline uses bounded sequential
-checkpoints and preserves complete-source coverage.
-
-Supported providers:
-
-- `openai`
-- `anthropic`
-- `gemini`
-- `openai-compatible`
-- `openrouter`
-- `kimi`
-
-OpenAI-compatible providers require a base URL.
-
-### Privacy boundary
-
-Import, capture, browsing, keyword search, local semantic embeddings and Library
-management run locally. Smart search downloads a model only after an explicit
-setup action. A connected active BYOK profile enables queued source analysis;
-pause and daily attempt/token limits are visible in Context activity. Each call
-contains only its bounded source parts or compatible compact relationship
-candidates. Limits are conservative reservations, not a dollar spending guarantee.
-
-Production API keys live in the operating-system credential store. Encrypted
-backups exclude credentials and restore profiles disconnected. Exported diagnostics
-exclude raw text, local paths and provider secrets. Graph sharing starts with
-redacted generic labels and requires preview and confirmation. Use reads the current
-chat and draft only after the explicit action and never persists either input.
-
-## Configuration
-
-Reweave loads `.env` automatically. Copy `.env.example` when you want local
-defaults:
-
-```bash
-cp .env.example .env
+```powershell
+.venv\Scripts\pyinstaller.exe --noconfirm --clean packaging\Reweave.spec
+.\dist\Reweave\Reweave.exe
 ```
 
-Available environment variables:
+Keep the entire `dist\Reweave` folder together; the executable depends on its
+bundled files. Python and Node.js are not required on the computer running this bundle.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `REWEAVE_DB` | `./reweave.db` | Default SQLite archive path. |
-| `REWEAVE_EXPORT_DIR` | `./exports` | Default Markdown export directory. |
-| `REWEAVE_LLM_PROVIDER` | `openai` | Default insight provider. |
-| `REWEAVE_LLM_MODEL` | `gpt-4o-mini` | Default insight model. |
-| `REWEAVE_LLM_BASE_URL` | empty | Provider base URL override. |
-| `REWEAVE_LLM_API_KEY` | empty | Provider API key. |
-| `REWEAVE_LLM_MAX_CONTEXT_CHARS` | `80000` | Maximum source context per model call. |
-| `REWEAVE_LLM_TEMPERATURE` | `0.2` | Insight generation temperature. |
+To create the per-user installer, follow the
+[Windows packaging guide](packaging/installer/README.md#repeating-the-build).
+It produces `dist\Reweave-Setup.exe` and a manifest with file hashes. The installer
+includes the extension but leaves its browser installation and registration to you.
 
-## CLI Reference
-
-```bash
-uv run reweave --help
-uv run reweave import <path> [--db ./reweave.db]
-uv run reweave index [--rebuild] [--db ./reweave.db]
-uv run reweave search <query> [--mode auto|keyword|semantic] [--provider chatgpt|claude] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--title text] [--limit 20] [--db ./reweave.db]
-uv run reweave ask <question> [--mode auto|keyword|semantic] [--db ./reweave.db]
-uv run reweave show <conversation_id> [--db ./reweave.db]
-uv run reweave stats [--db ./reweave.db]
-uv run reweave export [conversation_id] [--query query] [-o ./exports] [--limit 50] [--db ./reweave.db]
-uv run reweave app [--host 127.0.0.1] [--port 8765] [--db ./reweave.db]
-uv run reweave desktop [--db ./reweave.db]
-```
-
-Search options:
-
-- `--mode auto`: recommended default; hybrid when Smart search is ready,
-  otherwise keyword fallback.
-- `--mode keyword`: exact, phrase, prefix, and substring retrieval without a
-  downloaded model.
-- `--mode semantic`: meaning-only retrieval; fails clearly if the local index
-  is not ready.
-- `--provider`: filter by `chatgpt` or `claude`.
-- `--from`: include conversations created on or after a date.
-- `--to`: include conversations created on or before a date.
-- `--title`: filter by title substring.
-- `--limit`: cap the number of returned matches.
-
-See [Choosing a search mode](#choosing-a-search-mode) for selection guidance and
-[Search Evaluation](docs/search-evaluation.md) for measured quality and latency.
-
-Export modes:
-
-- `reweave export <conversation_id>` writes a source conversation Markdown file.
-- `reweave export --query <query>` writes a search-result dossier Markdown file.
-
-## Project Structure
+## Your first Save and Use
 
 ```text
-reweave/
-+-- frontend/           # React/Vite local web app
-+-- packaging/          # Desktop packaging entrypoint
-+-- src/reweave/        # Python CLI, archive, API, desktop, LLM, and parser code
-+-- tests/              # Python tests and fixtures
-+-- pyproject.toml      # Python package metadata
-+-- README.md
+Choose a conversation → Save or Import → Analyze → Read and check → Use in a new draft
+                        stored locally    BYOK      local library    you press Send
 ```
 
-## Development
+### 1. Add a conversation
 
-Run Python tests and linting:
+Choose **Import conversations** and select a supported `.json` or `.zip` export.
+Start with a few conversations you want to revisit, or import a whole export to
+build up your history. Repeated imports and Saves update existing conversations
+without duplicating unchanged content.
 
-```bash
-uv run pytest
-uv run ruff check src/ tests/
+Supported imports are ChatGPT `conversations.json`, Claude conversation JSON, and
+ZIP files containing those formats. ZIP import reads supported JSON files;
+attachments and other non-JSON files are not imported. Arbitrary PDFs, notes,
+webpages, and other chat providers are outside the current import scope.
+
+For everyday browser capture, set up the extension below and choose
+**Save current conversation**. Wait until the assistant has finished responding.
+
+### 2. Connect analysis when you are ready
+
+In **Settings**, choose a provider, connect your API key, and select an available
+model. Supported settings include OpenAI, Anthropic, Google Gemini, OpenRouter,
+and OpenAI-compatible endpoints. A compatible endpoint also needs its base URL.
+Your analysis provider can differ from the assistant that produced the conversation.
+
+**BYOK** means *bring your own API key*. Reweave sends selected conversation content
+directly to that provider for analysis, and the provider's API charges may apply.
+Connecting an active provider can start pending analysis automatically, so review
+your queued sources and the [privacy boundaries](#privacy-and-your-data) first.
+
+Context activity shows progress, pause/retry controls, and daily request/token
+allowances. These are usage safeguards, not an exact currency spending cap. Long
+conversations are processed in resumable parts; incomplete work is shown as incomplete.
+
+### 3. Read, check, and correct
+
+Open **Home** for a readable overview or **Explore** to follow projects and topics.
+Use **Read context & sources** or **View source** to check the supporting conversation.
+Correct an inaccurate item or scope; the library keeps history and offers undo.
+Some conversations produce a useful Brief without any individual Context Items.
+
+### 4. Bring context into your next chat
+
+With Reweave running, write a request in a supported ChatGPT or Claude conversation,
+then open the extension and choose **Use Reweave context**.
+
+On first use, choose the destination and retry **Use**. Private allows relevant
+ordinary context across spaces; Work, Client, and Shared require allowed scopes.
+Sensitive context needs a separate preview and confirmation. Reweave remembers
+your destination choice for that conversation.
+
+Review the block added before your draft, then send when you are ready. Your draft
+is preserved, and a later explicit Use replaces the previous block. **Use does not
+save the current conversation or press Send.**
+
+### Set up the Chrome or Edge extension
+
+1. [Build the Windows package](#build-the-windows-package) so `ReweaveNativeHost.exe` exists.
+2. Open `chrome://extensions` or `edge://extensions`, enable **Developer mode**,
+   choose **Load unpacked**, and select this repository's `extension` folder.
+3. Copy the extension ID shown by that browser.
+4. From the repository root, run the following command, replacing the ID and
+   using `-Browser Edge` if you use Edge:
+
+```powershell
+.\scripts\register_native_host.ps1 -ExtensionId 'YOUR_32_CHARACTER_EXTENSION_ID' -Browser Chrome
 ```
 
-Run frontend checks:
+5. Start `.\dist\Reweave\Reweave.exe`, open a ChatGPT or Claude conversation, and
+   open the extension. `Alt+Shift+R` opens the same popup on Windows unless remapped.
 
-```bash
-cd frontend
-npm test
-npm run build
-```
+The registration script connects that extension to the local app using the current
+Windows user's Native Messaging settings. No local URL or token needs to be copied.
+For an installer-based setup, use the different paths in the
+[installed-extension guide](packaging/installer/README.md#browser-extension-an-explicit-second-step).
+See the [extension guide](extension/README.md) for permissions and behavior.
 
-Build the Python package:
+## Privacy and your data
 
-```bash
-uv build
-```
+| Action | What happens to your data |
+| --- | --- |
+| Save / Import | The selected conversation is stored locally before analysis. There is no passive conversation capture. |
+| Browse / Search | Retrieval runs locally. Enabling Smart search downloads a model, then builds embeddings locally. |
+| AI analysis | Selected sources go directly to your chosen BYOK provider. Relationship analysis may also send a bounded set of compatible existing summaries. |
+| Use | The current chat and draft are processed locally for retrieval without being saved. Inserted context becomes available to the destination webpage, even before you press Send. |
+| Backup | A password-encrypted `.reweave` file contains the library and settings, but not API keys. Restored providers need reconnection. |
+| Share / Diagnostics | Export is explicit. Graph sharing uses a redacted preview; diagnostics omit conversation text and credentials. Posting a file elsewhere is your choice. |
 
-When changing the web app, run `npm run build` before packaging so the Python
-package includes the latest static frontend.
+API keys saved in Settings use the operating-system credential store. **The live
+SQLite library is not encrypted at rest; encrypted backups do not encrypt the live
+database.** Removing an original conversation leaves derived context and retained
+evidence; delete those separately when you intend to remove them too.
 
-Search quality and 50,000-message latency are covered by reproducible benchmark
-scripts. See [docs/search-evaluation.md](docs/search-evaluation.md) for the
-golden-query suite, commands, targets, and latest local measurements.
+Local storage does not make remote analysis private to your device. Sensitive-use
+confirmation controls context reuse; it does not redact a source you select for
+analysis. Read the [privacy and support guide](docs/release/PRIVACY_AND_SUPPORT.md)
+for the full data lifecycle.
+
+## FAQ and troubleshooting
+
+### Do I need an API key or a Reweave account?
+
+No Reweave account is required. Save, import, browsing, and keyword search work
+without a key. Creating Briefs and Context Items requires a configured analysis
+provider. Optional local Smart search requires a model download, but no API key.
+
+### Where is my library stored?
+
+The desktop defaults to `%LOCALAPPDATA%\Reweave`; CLI commands and `reweave app`
+default to `./reweave.db`. Use `--db` or `REWEAVE_DB` to select a database, and
+`REWEAVE_DATA_DIR` to relocate the desktop's data/settings/model directory.
+Only one app or CLI process can use a library at a time. See
+[configuration](docs/DEVELOPMENT.md#configuration) for examples.
+
+### Why is analysis pending, or why is Home empty?
+
+Check the active provider, pause state, daily allowance, and retry time in Context
+activity. Until analysis finishes, your saved conversations are still available
+in **Sources** and search. You can retry a failed source or choose **Analyze** in Sources.
+
+### Why does the extension say to open Reweave?
+
+Start the desktop app, then check the registered Native Host path, browser, and
+extension ID. Loading the unpacked extension alone is not enough. Retry from a
+supported, fully loaded conversation after its response finishes.
+
+### Can I sync devices or use other platforms?
+
+The current desktop target is Windows; the extension targets Chrome and Edge with
+ChatGPT and Claude. Account-backed sync, macOS, additional chat providers, and team
+libraries are outside the current release path. You can move a library with an
+encrypted backup. The application UI is English; this README is also available in Korean.
+
+## Project status
+
+The Reading Room, Save/Use, linked context, corrections, search, graph, and encrypted
+maintenance flows have implementation and isolated verification evidence. Real-owner
+daily-use acceptance, normal Windows file-dialog checks, and public distribution
+remain open. Screenshots and automated checks do not establish personal usefulness.
+
+See [Project Status](docs/PROJECT_STATUS.md) for current evidence,
+[Roadmap](docs/ROADMAP.md) for remaining work, and
+[Product Spec](docs/PRODUCT_SPEC.md) for the intended behavior.
+
+## Contributing and support
+
+Bug reports, documentation improvements, and focused fixes are welcome.
+[Open an issue](https://github.com/seolbbb/reweave/issues) with reproducible steps,
+expected behavior, and what happened. Use synthetic examples and review screenshots
+before sharing; never attach private exports, databases, backups, or API keys.
+
+For code or documentation changes, read [AGENTS.md](AGENTS.md) and the
+[development guide](docs/DEVELOPMENT.md). **All pull requests target `dev`**, and
+merges use merge commits. Commits, PRs, code comments, and canonical documentation
+are in English; the Korean README is an explicitly approved exception.
 
 ## License
 
-MIT
+[MIT](LICENSE).
