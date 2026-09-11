@@ -3,8 +3,11 @@
 ## Document control
 
 - Status: accepted
-- Last reviewed: 2026-09-09
+- Last reviewed: 2026-09-11
 - Working language: English
+- Reader documentation: English `README.md` and Korean `README.ko.md` provide equivalent
+  getting-started guidance under the explicit owner exception in DEC-031. The application UI,
+  canonical records, code comments, commits, and GitHub collaboration remain English.
 - Product promise: Reweave turns the AI conversations you choose into a living, linked context library, then brings the right context back to the AI you already use.
 
 ## Product intent
