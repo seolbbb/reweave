@@ -3,7 +3,7 @@
 ## Document control
 
 - Status: active
-- Last reviewed: 2026-09-10
+- Last reviewed: 2026-09-11
 - Working language: English
 
 ## Status vocabulary
@@ -268,6 +268,11 @@ Tasks:
     approval only after preparatory work is ready. No paid call is currently authorized.
 - [ ] TASK-013: Resolve the public v1 scope freeze and encrypted-synchronization timing.
 - [ ] TASK-014: Prepare and verify the Windows and Chrome/Edge Public Beta release surfaces.
+  - Equivalent English and Korean README onboarding is complete for the 2026-09-11 refresh
+    (DEC-031), with reference research, aligned commands, linked synthetic screenshots and
+    documentation/runtime verification in `docs/verification/2026-09-11/readme-refresh.md`.
+    This does not close the public-release task or replace TASK-012 as the single next
+    product-acceptance task.
   - Local per-user installer, unpacked extension and English privacy/support guides are prepared
     with isolated verification. Normal owner installation, real browser registration, signing or
     an explicitly accepted unsigned distribution route, and publication remain separate gates.

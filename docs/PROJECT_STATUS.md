@@ -2,11 +2,14 @@
 
 ## Snapshot
 
-- Last verified: 2026-09-10 (isolated implementation, browser and fresh executable verification)
+- Last verified: 2026-09-11 (bilingual documentation, focused regression and fresh executable verification)
 - Working language: English
 - Current phase: PHASE-002
 - State: active
-- Repository state: This delivery started from a clean worktree at 2303357 on
+- Repository state: The README refresh started from clean `main` at b0f64c5 on
+  `codex/bilingual-readme`. It changes reader documentation and its canonical record, not
+  application behavior. Its verification is recorded below. The earlier product delivery
+  started from a clean worktree at 2303357 on
   `codex/reading-room-product`. The required dev-PR/main integration record accompanies the
   delivered artifacts; re-observe Git tips rather than inferring them from this source snapshot.
   Historical TASK-001 through TASK-004 evidence below is not treated as a fresh run.
@@ -81,6 +84,33 @@ limitations are separated below; presence in this list is not final product acce
   dogfooding remains unverified and mandatory in TASK-012; no current user archive was inspected.
 
 ## Verification evidence
+
+### Bilingual README refresh, 2026-09-11
+
+- Re-observed current source, manifests, launcher defaults, extension registration, Git tips,
+  release availability, tests and real packaged behavior. The public repository had zero
+  published releases and zero configured Actions workflows; Issues was enabled and Discussions
+  disabled. The README does not advertise a downloadable public build or a passing CI badge.
+- Equivalent English and Korean READMEs now lead with the product, existing synthetic app
+  screenshots, first-run commands, and the Save/Import-to-Use flow. Detailed CLI, configuration,
+  API discovery and checks live in `docs/DEVELOPMENT.md`. DEC-031 records the narrow owner-approved
+  localization exception. AGENTS.md's protected language section was not modified.
+- Reference review covered Open WebUI, AnythingLLM, Logseq and Khoj. Local file/heading links,
+  Markdown parsing, image descriptions and all four shared PowerShell command blocks passed
+  the documentation audit. Reference counts and verification details are in
+  `docs/verification/2026-09-11/readme-refresh.md`.
+- `uv sync --locked` passed. Frontend tests: 102 passed; TypeScript/Vite production build passed
+  with unchanged tracked assets. An initial build through the C: alias failed on mixed resolved
+  paths; rerunning from the physical D: checkout passed without a code or configuration change.
+- Focused CLI/parser/registration/runtime regression: 65 passed, with one existing Starlette
+  deprecation warning. All 12 help/fixture CLI invocations, Ruff, strict-full canonical validation
+  (zero errors/warnings) and diff hygiene passed. Fresh PyInstaller build created both Windows executables.
+  The existing packaged synthetic smoke passed Save, no-key queueing, one loopback fake-provider
+  analysis, exact evidence, explicit Use, restart, idempotence, transient-draft handling and
+  owned shutdown. Its privacy-safe report is `docs/verification/2026-09-11/packaged-readme-smoke.json`.
+- No owner Library, native dialog, browser profile, registry registration, model download, paid
+  provider call or public binary release was used. TASK-012 remains the single Next task;
+  documentation delivery does not close real-owner acceptance or TASK-014 publication.
 
 ### Current execution, 2026-09-09 through 2026-09-10
 
